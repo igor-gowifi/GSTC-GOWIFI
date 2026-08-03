@@ -1,0 +1,51 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gowifi-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - VITE_APP_ID=${VITE_APP_ID}
+      - OAUTH_SERVER_URL=${OAUTH_SERVER_URL}
+      - VITE_OAUTH_PORTAL_URL=${VITE_OAUTH_PORTAL_URL}
+      - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
+      - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
+      - BUILT_IN_FORGE_API_URL=${BUILT_IN_FORGE_API_URL}
+      - BUILT_IN_FORGE_API_KEY=${BUILT_IN_FORGE_API_KEY}
+      - VITE_APP_TITLE=${VITE_APP_TITLE}
+      - VITE_APP_LOGO=${VITE_APP_LOGO}
+    networks:
+      - gowifi-network
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.pnpm-store
+      - ./database:/app/database
+
+  nginx:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: gowifi-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./npm-data:/data
+      - ./npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - gowifi-network
+    depends_on:
+      - app
+
+networks:
+  gowifi-network:
+    driver: bridge

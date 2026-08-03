@@ -1,0 +1,4 @@
+
+> gowifi-management-app@1.0.0 dev
+> cross-env NODE_ENV=development tsx watch server/_core/index.ts
+

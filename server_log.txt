@@ -1,0 +1,142 @@
+
+> gowifi-management-app@1.0.0 start
+> cross-env NODE_ENV=production node dist/index.js
+
+Server running on http://localhost:3000/
+[Context] Authentication failed: Missing Authorization header
+[Context] Authentication failed: Missing Authorization header
+📝 [AUDIT] USUARIO_LOGADO: test@example.com
+[Context] Authentication failed: Missing Authorization header
+[Context] Authentication failed: Missing Authorization header
+[tRPC] solicitacoes.list called
+[tRPC] solicitacoes.filter called with: {
+  searchTerm: '',
+  status: '',
+  projeto: '',
+  dia: '',
+  semana: '',
+  sortBy: 'data-criacao',
+  mes: '',
+  ano: '',
+  empresaParceira: '',
+  dataAtividadeStart: '',
+  dataAtividadeEnd: '',
+  dataCriacaoStart: '',
+  dataCriacaoEnd: '',
+  dataConclusaoStart: '',
+  dataConclusaoEnd: ''
+}
+[tRPC] solicitacoes.list returned: 8 solicitacoes
+[tRPC] solicitacoes.filter called with: {
+  searchTerm: '',
+  status: '',
+  projeto: '',
+  dia: '',
+  semana: '',
+  sortBy: 'data-criacao-desc',
+  mes: '',
+  ano: '',
+  empresaParceira: '',
+  dataAtividadeStart: '',
+  dataAtividadeEnd: '',
+  dataCriacaoStart: '',
+  dataCriacaoEnd: '',
+  dataConclusaoStart: '',
+  dataConclusaoEnd: ''
+}
+[tRPC] solicitacoes.filter called with: sortBy: data-criacao-desc, sortBy: data-criacao-desc
+[FilterCoordinator] Starting with 8 solicitacoes
+[FilterCoordinator] Final result: 8 solicitacoes
+[tRPC] solicitacoes.filter returned: 8 solicitacoes (sortBy: data-criacao-desc)
+[tRPC] solicitacoes.filter called with: sortBy: data-criacao, sortBy: data-criacao
+[FilterCoordinator] Starting with 8 solicitacoes
+[FilterCoordinator] Final result: 8 solicitacoes
+[tRPC] solicitacoes.filter returned: 8 solicitacoes (sortBy: data-criacao)
+[tRPC] solicitacoes.filter called with: {
+  searchTerm: '',
+  status: 'pendente',
+  projeto: '',
+  dia: '',
+  semana: '',
+  sortBy: 'data-criacao',
+  mes: '',
+  ano: '',
+  empresaParceira: '',
+  dataAtividadeStart: '',
+  dataAtividadeEnd: '',
+  dataCriacaoStart: '',
+  dataCriacaoEnd: '',
+  dataConclusaoStart: '',
+  dataConclusaoEnd: ''
+}
+[tRPC] solicitacoes.filter called with: status: pendente + sortBy: data-criacao, sortBy: data-criacao
+[FilterCoordinator] Starting with 1 solicitacoes
+[FilterCoordinator] After status filter: 1 solicitacoes
+[FilterCoordinator] Final result: 1 solicitacoes
+[tRPC] solicitacoes.filter returned: 1 solicitacoes (status: pendente + sortBy: data-criacao)
+TypeError: fetch failed
+    at node:internal/deps/undici/undici:13484:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async _handleRequest (/home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@supabase+auth-js@2.93.1/node_modules/@supabase/auth-js/dist/main/lib/fetch.js:101:18)
+    at async _request (/home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@supabase+auth-js@2.93.1/node_modules/@supabase/auth-js/dist/main/lib/fetch.js:91:18)
+    at async GoTrueAdminApi.getUserById (/home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@supabase+auth-js@2.93.1/node_modules/@supabase/auth-js/dist/main/GoTrueAdminApi.js:191:20)
+    at async SDKServer.authenticateRequest (file:///home/ubuntu/gowifi-management-app/gowifi-management-app/dist/index.js:2380:57)
+    at async Object.createContext (file:///home/ubuntu/gowifi-management-app/gowifi-management-app/dist/index.js:2409:12)
+    at async Object.createContext (file:///home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@trpc+server@11.8.1_typescript@5.9.3/node_modules/@trpc/server/dist/node-http-pD5xpNfK.mjs:201:13)
+    at async Object.create (file:///home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@trpc+server@11.8.1_typescript@5.9.3/node_modules/@trpc/server/dist/resolveResponse-C7AcnFLN.mjs:1884:18)
+    at async resolveResponse (file:///home/ubuntu/gowifi-management-app/gowifi-management-app/node_modules/.pnpm/@trpc+server@11.8.1_typescript@5.9.3/node_modules/@trpc/server/dist/resolveResponse-C7AcnFLN.mjs:1910:3) {
+  [cause]: ConnectTimeoutError: Connect Timeout Error (attempted addresses: 172.64.149.246:443, timeout: 10000ms)
+      at onConnectTimeout (node:internal/deps/undici/undici:2602:28)
+      at Immediate._onImmediate (node:internal/deps/undici/undici:2583:11)
+      at process.processImmediate (node:internal/timers:491:21) {
+    code: 'UND_ERR_CONNECT_TIMEOUT'
+  }
+}
+[Auth] Verification failed: Invalid Supabase token
+[Context] Authentication failed: Invalid session - Supabase token verification failed
+[tRPC] solicitacoes.list called
+[tRPC] solicitacoes.filter called with: {
+  searchTerm: '',
+  status: '',
+  projeto: '',
+  dia: '',
+  semana: '',
+  sortBy: 'data-criacao',
+  mes: '',
+  ano: '',
+  empresaParceira: '',
+  dataAtividadeStart: '',
+  dataAtividadeEnd: '',
+  dataCriacaoStart: '',
+  dataCriacaoEnd: '',
+  dataConclusaoStart: '',
+  dataConclusaoEnd: ''
+}
+[tRPC] solicitacoes.list returned: 8 solicitacoes
+[tRPC] solicitacoes.filter called with: sortBy: data-criacao, sortBy: data-criacao
+[FilterCoordinator] Starting with 8 solicitacoes
+[FilterCoordinator] Final result: 8 solicitacoes
+[tRPC] solicitacoes.filter returned: 8 solicitacoes (sortBy: data-criacao)
+[tRPC] solicitacoes.list called
+[tRPC] solicitacoes.filter called with: {
+  searchTerm: '',
+  status: '',
+  projeto: '',
+  dia: '',
+  semana: '',
+  sortBy: 'data-criacao',
+  mes: '',
+  ano: '',
+  empresaParceira: '',
+  dataAtividadeStart: '',
+  dataAtividadeEnd: '',
+  dataCriacaoStart: '',
+  dataCriacaoEnd: '',
+  dataConclusaoStart: '',
+  dataConclusaoEnd: ''
+}
+[tRPC] solicitacoes.list returned: 8 solicitacoes
+[tRPC] solicitacoes.filter called with: sortBy: data-criacao, sortBy: data-criacao
+[FilterCoordinator] Starting with 8 solicitacoes
+[FilterCoordinator] Final result: 8 solicitacoes
+[tRPC] solicitacoes.filter returned: 8 solicitacoes (sortBy: data-criacao)

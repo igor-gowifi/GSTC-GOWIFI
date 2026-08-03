@@ -1,0 +1,1810 @@
+import { COOKIE_NAME } from "@shared/const";
+import { getSessionCookieOptions } from "./_core/cookies";
+import { systemRouter } from "./_core/systemRouter";
+import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
+import { z } from "zod";
+import { ENV } from "./_core/env";
+import axios from "axios";
+import { getUserByEmail, upsertUser, findNearestTecnicos, geocodeAddress } from "./db";
+import { logAuditEvent } from "./auditHelper";
+
+// Freshdesk API removed for standalone deployment
+
+export const appRouter = router({
+  // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
+  system: systemRouter,
+  auth: router({
+    me: publicProcedure.query((opts) => {
+      if (!opts.ctx.user) return null;
+      
+      // Use role from database (no hardcoded overrides)
+      const role = opts.ctx.user.role || 'analista';
+      
+      // Return user with uid field for frontend compatibility
+      return {
+        uid: opts.ctx.user.openId,
+        email: opts.ctx.user.email || '',
+        name: opts.ctx.user.name || opts.ctx.user.email || '',
+        role: role as 'adminmaster' | 'admin' | 'analista' | 'tecnico',
+      };
+    }),
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      
+      if (ctx.user?.email) {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+          
+          const timestamp = new Date().getTime();
+          const dataFormatada = new Date(timestamp).toLocaleString('pt-BR');
+          
+          await supabase.from('audit_logs').insert([{
+            timestamp,
+            data_formatada: dataFormatada,
+            usuario: ctx.user.email,
+            usuario_nome: ctx.user.name || ctx.user.email,
+            acao: 'logout',
+            descricao: `${ctx.user.name || ctx.user.email} fez logout`,
+            tipo_documento: 'login',
+            id_documento: ctx.user.openId || 'unknown',
+          }]);
+        } catch (error) {
+          console.error('Failed to log logout:', error);
+        }
+      }
+      
+      return {
+        success: true,
+      } as const;
+    }),
+  }),
+
+  // Audit logs
+  audit: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      // Only adminmaster and admin can list audit logs
+      if (ctx.user?.role !== 'adminmaster' && ctx.user?.role !== 'admin') {
+        throw new Error('Voce nao tem permissao para acessar os logs de auditoria');
+      }
+
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .limit(1000);
+
+        if (error) {
+          console.error('Erro ao listar audit logs:', error);
+          throw new Error(error.message);
+        }
+
+        return data || [];
+      } catch (error) {
+        console.error('Erro ao listar audit logs:', error);
+        throw error;
+      }
+    }),
+
+    log: protectedProcedure
+      .input(
+        z.object({
+          usuario: z.string(),
+          usuarioNome: z.string().optional(),
+          acao: z.string(),
+          descricao: z.string(),
+          tipoDocumento: z.enum(['tecnico', 'solicitacao', 'login']),
+          idDocumento: z.string(),
+          dadosAntes: z.record(z.string(), z.any()).optional(),
+          dadosDepois: z.record(z.string(), z.any()).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          const timestamp = new Date().getTime();
+          const dataFormatada = new Date(timestamp).toLocaleString('pt-BR');
+
+          const { data, error } = await supabase
+            .from('audit_logs')
+            .insert([
+              {
+                timestamp,
+                data_formatada: dataFormatada,
+                usuario: input.usuario,
+                usuario_nome: input.usuarioNome,
+                acao: input.acao,
+                descricao: input.descricao,
+                tipo_documento: input.tipoDocumento,
+                id_documento: input.idDocumento,
+                dados_antes: input.dadosAntes,
+                dados_depois: input.dadosDepois,
+              },
+            ]);
+
+          if (error) {
+            console.error('Erro ao registrar audit log no Supabase:', error);
+            return { success: false, error: error.message };
+          }
+
+          console.log(`📝 [AUDIT] ${input.acao}: ${input.descricao}`);
+          return { success: true, data };
+        } catch (error) {
+          console.error('Erro ao registrar audit log:', error);
+          return { success: false, error: String(error) };
+        }
+      }),
+  }),
+
+  // Tecnicos routes
+  tecnicos: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        // Get all active technicians (tec_ativo = true)
+        const { data, error } = await supabase
+          .from('tecnicos')
+          .select('*')
+          .eq('tec_ativo', true)
+          .order('tec_data_criacao', { ascending: false });
+
+        if (error) {
+          console.error('Erro ao listar tecnicos:', error);
+          throw new Error(error.message);
+        }
+
+        return data || [];
+      } catch (error) {
+        console.error('Erro ao listar tecnicos:', error);
+        throw error;
+      }
+    }),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          tec_nome: z.string(),
+          tec_telefone: z.string().optional(),
+          tec_cpf: z.string().optional(),
+          tec_rg: z.string().optional(),
+          tec_cep: z.string().optional(),
+          tec_rua: z.string().optional(),
+          tec_numero: z.string().optional(),
+          tec_complemento: z.string().optional(),
+          tec_bairro: z.string().optional(),
+          tec_cidade: z.string().optional(),
+          tec_uf: z.string().optional(),
+          tec_empresa_parceira: z.string().optional(),
+          tec_equipamentos: z.string().optional(),
+          tec_observacoes: z.string().optional(),
+          // Individual evaluation fields
+          tec_avaliacao_pontualidade: z.number().min(0).max(5).optional(),
+          tec_avaliacao_ferramentas: z.number().min(0).max(5).optional(),
+          tec_avaliacao_produtividade: z.number().min(0).max(5).optional(),
+          tec_avaliacao_conhecimento: z.number().min(0).max(5).optional(),
+          tec_avaliacao_flexibilidade: z.number().min(0).max(5).optional(),
+          // Average evaluation (calculated from 5 individual fields on frontend)
+          tec_avaliacao: z.number().min(0).max(5).optional(),
+          lat: z.number().optional(),
+          long: z.number().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // Use the average evaluation provided by frontend
+          const avaliacaoMedia = input.tec_avaliacao || 0;
+
+          // Geocoding: Get lat/long from address if not provided
+          let lat = input.lat;
+          let long = input.long;
+
+          if (!lat || !long) {
+            try {
+              const coords = await geocodeAddress(
+                input.tec_rua || '',
+                input.tec_numero || '',
+                input.tec_bairro || '',
+                input.tec_cidade || '',
+                input.tec_uf || '',
+                input.tec_cep
+              );
+              if (coords) {
+                lat = coords.lat;
+                long = coords.long;
+              }
+            } catch (geocodeError) {
+              console.warn("Geocoding failed, continuing without coordinates:", geocodeError);
+            }
+          }
+
+          const { data, error } = await supabase
+            .from('tecnicos')
+            .insert([{
+              ...input,
+              tec_avaliacao: avaliacaoMedia,
+              tec_latitude: lat,
+              tec_longitude: long,
+              tec_criado_por: ctx.user?.email,
+              tec_atualizado_por: ctx.user?.email,
+            }])
+            .select();
+
+          if (error) {
+            console.error('Erro ao criar tecnico:', error);
+            throw new Error(error.message);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'create',
+            descricao: `Técnico criado: ${input.tec_nome}`,
+            tipoDocumento: 'tecnico',
+            idDocumento: data?.[0]?.id || 'unknown',
+            dadosDepois: data?.[0],
+          });
+          
+          return data?.[0];
+        } catch (error) {
+          console.error('Erro ao criar tecnico:', error);
+          throw error;
+        }
+      }),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          tec_nome: z.string().optional(),
+          tec_telefone: z.string().optional(),
+          tec_cpf: z.string().optional(),
+          tec_rg: z.string().optional(),
+          tec_cep: z.string().optional(),
+          tec_rua: z.string().optional(),
+          tec_numero: z.string().optional(),
+          tec_complemento: z.string().optional(),
+          tec_bairro: z.string().optional(),
+          tec_cidade: z.string().optional(),
+          tec_uf: z.string().optional(),
+          tec_empresa_parceira: z.string().optional(),
+          tec_equipamentos: z.string().optional(),
+          tec_observacoes: z.string().optional(),
+          // Individual evaluation fields
+          tec_avaliacao_pontualidade: z.number().min(0).max(5).optional(),
+          tec_avaliacao_ferramentas: z.number().min(0).max(5).optional(),
+          tec_avaliacao_produtividade: z.number().min(0).max(5).optional(),
+          tec_avaliacao_conhecimento: z.number().min(0).max(5).optional(),
+          tec_avaliacao_flexibilidade: z.number().min(0).max(5).optional(),
+          // Average evaluation (calculated from 5 individual fields on frontend)
+          tec_avaliacao: z.number().min(0).max(5).optional(),
+          lat: z.number().optional(),
+          long: z.number().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          const { id, ...updateData } = input;
+
+          // Use the average evaluation provided by frontend (if provided)
+          const avaliacaoMedia = updateData.tec_avaliacao;
+
+          // Geocoding: Get lat/long from address if address fields are provided
+          let lat = updateData.lat;
+          let long = updateData.long;
+
+          if ((!lat || !long) && (updateData.tec_rua || updateData.tec_bairro || updateData.tec_cidade || updateData.tec_uf)) {
+            try {
+              const coords = await geocodeAddress(
+                updateData.tec_rua || '',
+                updateData.tec_numero || '',
+                updateData.tec_bairro || '',
+                updateData.tec_cidade || '',
+                updateData.tec_uf || '',
+                updateData.tec_cep
+              );
+              if (coords) {
+                lat = coords.lat;
+                long = coords.long;
+              }
+            } catch (geocodeError) {
+              console.warn("Geocoding failed, continuing without coordinates:", geocodeError);
+            }
+          }
+
+          // Remove lat/long from updateData but KEEP individual evaluation fields
+          const { lat: _, long: __, tec_avaliacao_pontualidade, tec_avaliacao_ferramentas, tec_avaliacao_produtividade, tec_avaliacao_conhecimento, tec_avaliacao_flexibilidade, ...cleanUpdateData } = updateData;
+          const updatePayload: any = cleanUpdateData;
+          
+          // Include individual evaluation fields in payload
+          if (tec_avaliacao_pontualidade !== undefined) updatePayload.tec_avaliacao_pontualidade = tec_avaliacao_pontualidade;
+          if (tec_avaliacao_ferramentas !== undefined) updatePayload.tec_avaliacao_ferramentas = tec_avaliacao_ferramentas;
+          if (tec_avaliacao_produtividade !== undefined) updatePayload.tec_avaliacao_produtividade = tec_avaliacao_produtividade;
+          if (tec_avaliacao_conhecimento !== undefined) updatePayload.tec_avaliacao_conhecimento = tec_avaliacao_conhecimento;
+          if (tec_avaliacao_flexibilidade !== undefined) updatePayload.tec_avaliacao_flexibilidade = tec_avaliacao_flexibilidade;
+          
+          // Average evaluation will be calculated by the database trigger
+          if (avaliacaoMedia !== undefined) updatePayload.tec_avaliacao = avaliacaoMedia;
+          
+          updatePayload.tec_latitude = lat;
+          updatePayload.tec_longitude = long;
+          updatePayload.tec_atualizado_por = ctx.user?.email;
+          updatePayload.tec_data_atualizacao = new Date().toISOString();
+          
+          const { data, error } = await supabase
+            .from('tecnicos')
+            .update(updatePayload)
+            .eq('id', id)
+            .select();
+
+          if (error) {
+            console.error('Erro ao atualizar tecnico:', error);
+            throw new Error(error.message);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'update',
+            descricao: `Técnico atualizado: ${updateData.tec_nome || 'ID: ' + id}`,
+            tipoDocumento: 'tecnico',
+            idDocumento: id,
+            dadosDepois: data?.[0],
+          });
+          
+          return data?.[0];
+        } catch (error) {
+          console.error('Erro ao atualizar tecnico:', error);
+          throw error;
+        }
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          console.log('[TECNICO DELETE] Starting delete for ID:', input.id);
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // Soft delete: set tec_ativo = false
+          const { error: updateError } = await supabase
+            .from('tecnicos')
+            .update({ tec_ativo: 'inativo' })
+            .eq('id', input.id);
+
+          if (updateError) {
+            console.error('[TECNICO DELETE] Error updating tec_ativo:', updateError);
+            throw new Error(updateError.message);
+          }
+
+          console.log('[TECNICO DELETE] Delete completed successfully for ID:', input.id);
+          return { success: true };
+        } catch (error) {
+          console.error('[TECNICO DELETE] Error:', error);
+          throw error;
+        }
+      }),
+
+    // Equipment management
+    equipamentos: router({
+      list: protectedProcedure
+        .input(z.object({ tecnicoId: z.string() }))
+        .query(async ({ input }) => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          // TODO: Re-enable after Supabase schema cache is refreshed
+          return [];
+        }),
+
+      // Temporarily disabled to avoid Supabase schema cache issues
+      // create: protectedProcedure
+      //   .input(z.object({
+      //     tecnicoId: z.string(),
+      //     equipamentos: z.array(z.object({
+      //       tec_equip_tipo: z.enum(['AP', 'RB', 'Switch']),
+      //       tec_equip_nome: z.string(),
+      //       tec_equip_modelo: z.string().optional(),
+      //       tec_equip_quantidade: z.number().min(1),
+      //     })),
+      //   }))
+      //   .mutation(async ({ input, ctx }) => {
+      //     const { createClient } = await import('@supabase/supabase-js');
+      //     const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+      //     const { v4: uuidv4 } = await import('uuid');
+      //     const equipData = input.equipamentos.map(eq => ({
+      //       id: uuidv4(),
+      //       tecnico_id: input.tecnicoId,
+      //       tec_equip_tipo: eq.tec_equip_tipo,
+      //       tec_equip_nome: eq.tec_equip_nome,
+      //       tec_equip_modelo: eq.tec_equip_modelo,
+      //       tec_equip_quantidade: eq.tec_equip_quantidade,
+      //     }));
+      //     const { data: novosEquip, error } = await supabase.from('tecnicos_equipamentos').insert(equipData).select();
+      //     if (error) throw error;
+      //     const historicoData = novosEquip!.map(eq => ({
+      //       id: uuidv4(),
+      //       equipamento_id: eq.id,
+      //       tecnico_id: input.tecnicoId,
+      //       acao: 'criado',
+      //       tec_equip_tipo: eq.tec_equip_tipo,
+      //       tec_equip_nome: eq.tec_equip_nome,
+      //       tec_equip_modelo: eq.tec_equip_modelo,
+      //       tec_equip_quantidade: eq.tec_equip_quantidade,
+      //       usuario_id: ctx.user?.openId,
+      //     }));
+      //     await supabase.from('tecnicos_equipamentos_historico').insert(historicoData);
+      //     await logAuditEvent({
+      //       usuario: ctx.user?.email || 'unknown',
+      //       usuarioNome: ctx.user?.name,
+      //       acao: 'create_equipamentos',
+      //       descricao: `${novosEquip!.length} equipamento(s) adicionado(s)`,
+      //       tipoDocumento: 'equipamento',
+      //       idDocumento: input.tecnicoId,
+      //       dadosDepois: novosEquip,
+      //     });
+      //     return novosEquip;
+      //   }),
+
+      create: protectedProcedure
+        .input(z.object({
+          tecnicoId: z.string(),
+          equipamentos: z.array(z.object({
+            tec_equip_tipo: z.enum(['AP', 'RB', 'Switch']),
+            tec_equip_nome: z.string(),
+            tec_equip_modelo: z.string().optional(),
+            tec_equip_quantidade: z.number().min(1),
+          })),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          return [];
+        }),
+
+      update: protectedProcedure
+        .input(z.object({
+          tecnicoId: z.string(),
+          equipamentos: z.array(z.object({
+            tec_equip_tipo: z.enum(['AP', 'RB', 'Switch']),
+            tec_equip_nome: z.string(),
+            tec_equip_modelo: z.string().optional(),
+            tec_equip_quantidade: z.number().min(1),
+          })),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          return [];
+        }),
+
+      updateOld: protectedProcedure
+        .input(z.object({
+          tecnicoId: z.string(),
+          equipamentos: z.array(z.object({
+            tec_equip_tipo: z.enum(['AP', 'RB', 'Switch']),
+            tec_equip_nome: z.string(),
+            tec_equip_modelo: z.string().optional(),
+            tec_equip_quantidade: z.number().min(1),
+          })),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+          const { v4: uuidv4 } = await import('uuid');
+          const { data: equipAtual } = await supabase.from('tecnicos_equipamentos').select('*').eq('tecnico_id', input.tecnicoId);
+          if (equipAtual && equipAtual.length > 0) {
+            const historicoRemocao = equipAtual.map(eq => ({
+              id: uuidv4(),
+              equipamento_id: eq.id,
+              tecnico_id: input.tecnicoId,
+              acao: 'removido',
+              tec_equip_tipo: eq.tec_equip_tipo,
+              tec_equip_nome: eq.tec_equip_nome,
+              tec_equip_modelo: eq.tec_equip_modelo,
+              tec_equip_quantidade: eq.tec_equip_quantidade,
+              usuario_id: ctx.user?.openId,
+            }));
+            await supabase.from('tecnicos_equipamentos_historico').insert(historicoRemocao);
+          }
+          await supabase.from('tecnicos_equipamentos').delete().eq('tecnico_id', input.tecnicoId);
+          const equipData = input.equipamentos.map(eq => ({
+            id: uuidv4(),
+            tecnico_id: input.tecnicoId,
+            tec_equip_tipo: eq.tec_equip_tipo,
+            tec_equip_nome: eq.tec_equip_nome,
+            tec_equip_modelo: eq.tec_equip_modelo,
+            tec_equip_quantidade: eq.tec_equip_quantidade,
+          }));
+          const { data: novosEquip, error } = await supabase.from('tecnicos_equipamentos').insert(equipData).select();
+          if (error) throw error;
+          const historicoNovos = novosEquip!.map(eq => ({
+            id: uuidv4(),
+            equipamento_id: eq.id,
+            tecnico_id: input.tecnicoId,
+            acao: 'criado',
+            tec_equip_tipo: eq.tec_equip_tipo,
+            tec_equip_nome: eq.tec_equip_nome,
+            tec_equip_modelo: eq.tec_equip_modelo,
+            tec_equip_quantidade: eq.tec_equip_quantidade,
+            usuario_id: ctx.user?.openId,
+          }));
+          await supabase.from('tecnicos_equipamentos_historico').insert(historicoNovos);
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'update_equipamentos',
+            descricao: 'Equipamentos atualizados',
+            tipoDocumento: 'equipamento',
+            idDocumento: input.tecnicoId,
+            dadosDepois: novosEquip,
+          });
+          return novosEquip;
+        }),
+
+      historico: protectedProcedure
+        .input(z.object({ tecnicoId: z.string() }))
+        .query(async ({ input }) => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          // TODO: Re-enable after Supabase schema cache is refreshed
+          return [];
+        }),
+
+      listPending: protectedProcedure
+        .query(async () => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          // TODO: Re-enable after Supabase schema cache is refreshed
+          return [];
+        }),
+
+      updateReturnStatus: protectedProcedure
+        .input(z.object({ historicoId: z.string(), devolvido: z.boolean() }))
+        .mutation(async ({ input, ctx }) => {
+          // Temporarily disabled to avoid Supabase schema cache issues
+          // TODO: Re-enable after Supabase schema cache is refreshed
+          return { id: input.historicoId, devolvido: input.devolvido };
+        }),
+
+      historicoCompleto: protectedProcedure
+        .query(async ({ ctx }) => {
+          try {
+            const { createClient } = await import('@supabase/supabase-js');
+            const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+            
+            // Get equipment history
+            const { data: historico, error: historicoError } = await supabase
+              .from('tecnicos_equipamentos_historico')
+              .select('*')
+              .order('created_at', { ascending: false });
+            
+            if (historicoError) throw historicoError;
+            
+            // Get all technicians
+            const { data: tecnicos, error: tecnicosError } = await supabase
+              .from('tecnicos')
+              .select('*');
+            
+            if (tecnicosError) throw tecnicosError;
+            
+            // Merge technician data with equipment history
+            const merged = (historico || []).map((hist: any) => {
+              const tecnico = (tecnicos || []).find((t: any) => t.id === hist.tecnico_id);
+              return {
+                ...hist,
+                tec_nome: tecnico?.tec_nome,
+                tec_rua: tecnico?.tec_rua,
+                tec_numero: tecnico?.tec_numero,
+                tec_complemento: tecnico?.tec_complemento,
+                tec_bairro: tecnico?.tec_bairro,
+                tec_cidade: tecnico?.tec_cidade,
+                tec_uf: tecnico?.tec_uf,
+                tec_cep: tecnico?.tec_cep,
+              };
+            });
+            
+            return merged;
+          } catch (error) {
+            console.error('[tRPC] Error fetching equipment history:', error);
+            return [];
+          }
+        })
+    }),
+  }),
+
+
+
+
+
+  // Solicitacoes routes
+  solicitacoes: router({
+    create: protectedProcedure
+      .input(
+        z.object({
+          nomeAtividade: z.string(),
+          grupoProjeto: z.string().optional(),
+          servico: z.string().optional(),
+          operadora: z.string().optional(),
+          freshdeskTicket: z.string().optional(),
+          contatoLocal: z.string().optional(),
+          cep: z.string().optional(),
+          rua: z.string().optional(),
+          numero: z.string().optional(),
+          complemento: z.string().optional(),
+          bairro: z.string().optional(),
+          cidade: z.string().optional(),
+          uf: z.string().optional(),
+          dataAtividade: z.string().optional(),
+          horaAtividade: z.string().optional(),
+          status: z.string().optional(),
+          observacoes: z.string().optional(),
+          tecnicoId: z.string().nullable().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          console.log('[tRPC] solicitacoes.create called with:', { nomeAtividade: input.nomeAtividade, cidade: input.cidade, usuario: ctx.user?.email });
+          // Geocode the address
+          let latitude: number | null = null;
+          let longitude: number | null = null;
+
+          console.log('[tRPC] Geocoding address:', { rua: input.rua, numero: input.numero, cidade: input.cidade, uf: input.uf });
+
+          if (input.rua && input.numero && input.cidade && input.uf) {
+            const address = `${input.rua}, ${input.numero}, ${input.bairro || ''}, ${input.cidade}, ${input.uf}, ${input.cep || ''}`;
+            try {
+              const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+              );
+              const results = await response.json();
+              if (results && results.length > 0) {
+                latitude = parseFloat(results[0].lat);
+                longitude = parseFloat(results[0].lon);
+              }
+            } catch (error) {
+              console.error('Geocoding error:', error);
+            }
+          }
+
+          // Create solicitacao in Supabase
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          const { data, error } = await supabase
+            .from('solicitacoes')
+            .insert([
+              {
+                solic_nome: input.nomeAtividade,
+                solic_projeto: input.grupoProjeto,
+                solic_servico: input.servico,
+                solic_operadora: input.operadora,
+                solic_freshdesk: input.freshdeskTicket,
+                solic_contato_local: input.contatoLocal,
+                solic_cep: input.cep,
+                solic_rua: input.rua,
+                solic_numero: input.numero,
+                solic_complemento: input.complemento,
+                solic_bairro: input.bairro,
+                solic_cidade: input.cidade,
+                solic_uf: input.uf,
+                solic_data_atividade: input.dataAtividade,
+                solic_hora_atividade: input.horaAtividade,
+                solic_status: input.status || 'pendente',
+                solic_observacoes: input.observacoes,
+                solic_tecnico_id: input.tecnicoId || null, // UUID string, no parsing needed
+                solic_data_criacao: new Date().toISOString(),
+                solic_criado_por: ctx.user?.email,
+              },
+            ])
+            .select();
+
+          if (error) {
+            console.error('Error creating solicitacao:', error);
+            throw new Error(error.message);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'create',
+            descricao: `Solicitação criada: ${input.nomeAtividade}`,
+            tipoDocumento: 'solicitacao',
+            idDocumento: data?.[0]?.id || 'unknown',
+            dadosDepois: data?.[0],
+          });
+
+          return data?.[0];
+        } catch (error) {
+          console.error('Error in solicitacoes.create:', error);
+          throw error;
+        }
+      }),
+
+    list: protectedProcedure.query(async ({ ctx }) => {
+      try {
+        console.log('[tRPC] solicitacoes.list called');
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        const { data, error } = await supabase
+          .from('solicitacoes')
+          .select('*')
+          .neq('solic_status', 'cancelada')
+          .order('solic_data_criacao', { ascending: false });
+
+        if (error) {
+          console.error('Error fetching solicitacoes:', error);
+          throw new Error(error.message);
+        }
+
+        console.log('[tRPC] solicitacoes.list returned:', data?.length || 0, 'solicitacoes');
+        return data || [];
+      } catch (error) {
+        console.error('Error in solicitacoes.list:', error);
+        throw error;
+      }
+    }),
+
+    filter: protectedProcedure
+      .input(
+        z.object({
+          searchTerm: z.string().optional(),
+          status: z.string().optional(),
+          projeto: z.string().optional(),
+          dia: z.enum(['hoje', 'ontem', 'amanha']).optional().or(z.literal('')),
+          semana: z.enum(['esta-semana', 'semana-passada']).optional().or(z.literal('')),
+          mes: z.string().optional(),
+          ano: z.string().optional(),
+          empresaParceira: z.string().optional(),
+          dataAtividadeStart: z.string().optional(),
+          dataAtividadeEnd: z.string().optional(),
+          dataCriacaoStart: z.string().optional(),
+          dataCriacaoEnd: z.string().optional(),
+          dataConclusaoStart: z.string().optional(),
+          dataConclusaoEnd: z.string().optional(),
+        })
+      )
+      .query(async ({ input, ctx }) => {
+        try {
+          console.log('[tRPC] solicitacoes.filter called with:', input);
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          let query = supabase.from('solicitacoes').select('*');
+
+          // Apply filters
+          if (input.status) {
+            query = query.eq('solic_status', input.status);
+          }
+
+          if (input.projeto) {
+            query = query.eq('solic_projeto', input.projeto);
+          }
+
+          if (input.empresaParceira) {
+            // First, get all technicians with this empresa parceira
+            const { data: tecnicos, error: tecError } = await supabase
+              .from('tecnicos')
+              .select('id')
+              .eq('tec_empresa_parceira', input.empresaParceira);
+            
+            if (tecError) {
+              console.error('Error fetching technicians by empresa parceira:', tecError);
+            } else if (tecnicos && tecnicos.length > 0) {
+              const tecnicoIds = tecnicos.map(t => t.id);
+              query = query.in('solic_tecnico_id', tecnicoIds);
+            } else {
+              // No technicians found with this empresa, return empty
+              query = query.eq('id', -1);
+            }
+          }
+
+          if (input.dataAtividadeStart) {
+            query = query.gte('solic_data_atividade', input.dataAtividadeStart);
+          }
+
+          if (input.dataAtividadeEnd) {
+            query = query.lte('solic_data_atividade', input.dataAtividadeEnd);
+          }
+
+          if (input.dataCriacaoStart) {
+            query = query.gte('solic_data_criacao', input.dataCriacaoStart);
+          }
+
+          if (input.dataCriacaoEnd) {
+            query = query.lte('solic_data_criacao', input.dataCriacaoEnd);
+          }
+
+          if (input.dataConclusaoStart) {
+            query = query.gte('solic_data_conclusao', input.dataConclusaoStart);
+          }
+
+          if (input.dataConclusaoEnd) {
+            query = query.lte('solic_data_conclusao', input.dataConclusaoEnd);
+          }
+
+          const { data, error } = await query.order('solic_data_criacao', { ascending: false });
+
+          if (error) {
+            console.error('Error filtering solicitacoes:', error);
+            throw new Error(error.message);
+          }
+
+          // Apply client-side filters for search term and date-based filters
+          let filtered = data || [];
+
+          if (input.searchTerm) {
+            const term = input.searchTerm.toLowerCase();
+            filtered = filtered.filter(sol => {
+              const searchFields = [
+                sol.solic_nome,
+                sol.solic_projeto,
+                sol.solic_servico,
+                sol.solic_contato_local,
+                sol.solic_observacoes,
+                sol.solic_freshdesk
+              ].map(f => (f || '').toString().toLowerCase());
+              return searchFields.some(field => field.includes(term));
+            });
+          }
+
+          // Apply day filters
+          if (input.dia) {
+            const hoje = new Date();
+            filtered = filtered.filter(sol => {
+              const dataSol = new Date(sol.solic_data_criacao);
+              const diaAtual = hoje.getDate();
+              const diaSol = dataSol.getDate();
+              const mesAtual = hoje.getMonth();
+              const mesSol = dataSol.getMonth();
+              const anoAtual = hoje.getFullYear();
+              const anoSol = dataSol.getFullYear();
+
+              if (input.dia === 'hoje') {
+                return diaAtual === diaSol && mesAtual === mesSol && anoAtual === anoSol;
+              } else if (input.dia === 'ontem') {
+                const ontem = new Date(hoje);
+                ontem.setDate(ontem.getDate() - 1);
+                return diaSol === ontem.getDate() && mesSol === ontem.getMonth() && anoSol === ontem.getFullYear();
+              } else if (input.dia === 'amanha') {
+                const amanha = new Date(hoje);
+                amanha.setDate(amanha.getDate() + 1);
+                return diaSol === amanha.getDate() && mesSol === amanha.getMonth() && anoSol === amanha.getFullYear();
+              }
+              return false;
+            });
+          }
+
+          // Apply week filters
+          if (input.semana) {
+            const hoje = new Date();
+            const inicioSemanaPassa = new Date(hoje);
+            inicioSemanaPassa.setDate(hoje.getDate() - hoje.getDay() - 7);
+            const fimSemanaPassa = new Date(inicioSemanaPassa);
+            fimSemanaPassa.setDate(fimSemanaPassa.getDate() + 6);
+
+            const inicioSemanAtual = new Date(hoje);
+            inicioSemanAtual.setDate(hoje.getDate() - hoje.getDay());
+            const fimSemanAtual = new Date(inicioSemanAtual);
+            fimSemanAtual.setDate(fimSemanAtual.getDate() + 6);
+
+            filtered = filtered.filter(sol => {
+              const dataSol = new Date(sol.solic_data_criacao);
+              if (input.semana === 'esta-semana') {
+                return dataSol >= inicioSemanAtual && dataSol <= fimSemanAtual;
+              } else if (input.semana === 'semana-passada') {
+                return dataSol >= inicioSemanaPassa && dataSol <= fimSemanaPassa;
+              }
+              return false;
+            });
+          }
+
+          // Apply month filter
+          if (input.mes) {
+            filtered = filtered.filter(sol => {
+              const dataSol = new Date(sol.solic_data_criacao);
+              return (dataSol.getMonth() + 1).toString() === input.mes;
+            });
+          }
+
+          // Apply year filter
+          if (input.ano) {
+            filtered = filtered.filter(sol => {
+              const dataSol = new Date(sol.solic_data_criacao);
+              return dataSol.getFullYear().toString() === input.ano;
+            });
+          }
+
+          console.log('[tRPC] solicitacoes.filter returned:', filtered.length, 'solicitacoes');
+          return filtered;
+        } catch (error) {
+          console.error('Error in solicitacoes.filter:', error);
+          throw error;
+        }
+      }),
+
+    findNearestTecnicos: publicProcedure
+      .input(
+        z.object({
+          latitude: z.number(),
+          longitude: z.number(),
+          limit: z.number().optional().default(10),
+          sortBy: z.enum(['distance', 'rating']).optional().default('distance'),
+        })
+      )
+      .query(async ({ input }) => {
+        try {
+          console.log('[tRPC] solicitacoes.findNearestTecnicos called with:', { latitude: input.latitude, longitude: input.longitude, limit: input.limit });
+          const tecnicos = await findNearestTecnicos(input.latitude, input.longitude, input.limit, input.sortBy);
+          console.log('[tRPC] findNearestTecnicos returned:', tecnicos?.length || 0, 'technicians');
+          return tecnicos;
+        } catch (error) {
+          console.error('[tRPC] Error finding nearest technicians:', error);
+          throw error;
+        }
+      }),
+
+    sendToFreshdesk: protectedProcedure
+      .input(
+        z.object({
+          ticketId: z.number(),
+          data: z.string(),
+          hora: z.string(),
+          tecnicoNome: z.string(),
+          tecnicoCpf: z.string(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { responderTicketFreshdesk, formatarTextoLiberacaoFreshdesk } = await import('./freshdesk');
+          
+          const mensagem = formatarTextoLiberacaoFreshdesk(
+            input.data,
+            input.hora,
+            input.tecnicoNome,
+            input.tecnicoCpf
+          );
+          
+          const resultado = await responderTicketFreshdesk(input.ticketId, mensagem);
+          
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            tipoDocumento: 'solicitacao',
+            idDocumento: String(input.ticketId),
+            acao: 'update',
+            descricao: `Resposta enviada ao ticket #${input.ticketId} com dados do técnico ${input.tecnicoNome}`,
+          });
+          
+          return resultado;
+        } catch (error) {
+          console.error('[tRPC] Error sending to Freshdesk:', error);
+          throw error;
+        }
+      }),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.string(),
+          nomeAtividade: z.string().optional(),
+          grupoProjeto: z.string().optional(),
+          servico: z.string().optional(),
+          operadora: z.string().optional(),
+          freshdeskTicket: z.string().optional(),
+          contatoLocal: z.string().optional(),
+          endereco: z.string().optional(),
+          status: z.string().optional(),
+          dataAtividade: z.string().optional(),
+          horaAtividade: z.string().optional(),
+          dataConclusao: z.string().optional().nullable(),
+          horarioChegada: z.string().optional(),
+          horarioLiberacao: z.string().optional(),
+          horarioTermino: z.string().optional(),
+          faturamento: z.string().optional(),
+          observacoes: z.string().optional(),
+          dataAtualizacao: z.string().optional(),
+          tecnicoEscolhido: z.object({
+            id: z.string(),
+            nome: z.string(),
+            telefone: z.string().optional(),
+            cpf: z.string().optional(),
+            rg: z.string().optional(),
+            rua: z.string().optional(),
+            numero: z.string().optional(),
+            bairro: z.string().optional(),
+            cidade: z.string().optional(),
+            uf: z.string().optional(),
+            cep: z.string().optional(),
+            avaliacao: z.number().optional(),
+          }).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+          const updateData: any = {};
+          if (input.nomeAtividade) updateData.solic_nome = input.nomeAtividade;
+          if (input.grupoProjeto) updateData.solic_projeto = input.grupoProjeto;
+          if (input.servico) updateData.solic_servico = input.servico;
+          if (input.operadora) updateData.solic_operadora = input.operadora;
+          if (input.freshdeskTicket) updateData.solic_freshdesk = input.freshdeskTicket;
+          if (input.contatoLocal) updateData.solic_contato_local = input.contatoLocal;
+          if (input.dataAtividade) updateData.solic_data_atividade = input.dataAtividade;
+          if (input.horaAtividade) updateData.solic_hora_atividade = input.horaAtividade;
+          if (input.dataConclusao) updateData.solic_data_conclusao = input.dataConclusao;
+          if (input.status) updateData.solic_status = input.status;
+          if (input.horarioChegada) updateData.solic_horario_chegada = input.horarioChegada;
+          if (input.horarioLiberacao) updateData.solic_horario_liberacao = input.horarioLiberacao;
+          if (input.horarioTermino) updateData.solic_horario_termino = input.horarioTermino;
+          if (input.observacoes) updateData.solic_observacoes = input.observacoes;
+          if (input.faturamento) updateData.solic_faturamento = input.faturamento;
+          if (input.tecnicoEscolhido?.id) updateData.solic_tecnico_id = input.tecnicoEscolhido.id;
+          const { data, error } = await supabase
+            .from("solicitacoes")
+            .update(updateData)
+            .eq("id", input.id)
+            .select();
+          if (error) throw error;
+          
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'update',
+            descricao: `Solicitação atualizada: ${input.nomeAtividade || 'ID: ' + input.id}`,
+            tipoDocumento: 'solicitacao',
+            idDocumento: input.id,
+            dadosDepois: data?.[0],
+          });
+          
+          return data?.[0] || { success: true };
+        } catch (error) {
+          console.error("Error updating solicitacao:", error);
+          throw error;
+        }
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // Soft delete: set solic_status = 'cancelada'
+          const { error } = await supabase
+            .from('solicitacoes')
+            .update({ solic_ativo: 'inativo' })
+            .eq('id', input.id);
+
+          if (error) {
+            console.error('Erro ao deletar solicitacao:', error);
+            throw new Error(error.message);
+          }
+
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'delete',
+            descricao: `Solicitacao cancelada: ${input.id}`,
+            tipoDocumento: 'solicitacao',
+            idDocumento: input.id,
+          });
+
+          return { success: true };
+        } catch (error) {
+          console.error('Erro ao deletar solicitacao:', error);
+          throw error;
+        }
+      }),
+  }),
+
+  // Usuarios routes with role-based permissions
+  usuarios: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      // Only adminmaster and admin can list users
+      const userRole = ctx.user?.role;
+      if (userRole !== 'adminmaster' && userRole !== 'admin') {
+        throw new Error('Você não tem permissão para acessar esta página');
+      }
+
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        const { data, error } = await supabase
+          .from('users')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Erro ao listar usuarios:', error);
+          throw new Error(error.message);
+        }
+
+        return data || [];
+      } catch (error) {
+        console.error('Erro ao listar usuarios:', error);
+        throw error;
+      }
+    }),
+
+    create: protectedProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          name: z.string(),
+          role: z.enum(['adminmaster', 'admin', 'analista']),
+          password: z.string().min(6).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const userRole = ctx.user?.role;
+
+        // Permission checks
+        if (userRole === 'analista') {
+          throw new Error('Você não tem permissão para criar usuários');
+        }
+
+        if (userRole === 'admin') {
+          // Admin can create admin and analista users
+          if (input.role === 'adminmaster') {
+            throw new Error('Você não pode criar usuários com perfil adminmaster');
+          }
+        }
+
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // First, check if user already exists in the database
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', input.email)
+            .single();
+
+          if (existingUser) {
+            throw new Error('Usuario com este email ja existe');
+          }
+
+          let userId: string | undefined;
+
+          // Try to get the user from Auth if they already exist there
+          const { data: { users: existingAuthUsers } } = await supabase.auth.admin.listUsers();
+          const existingAuthUser = existingAuthUsers?.find(u => u.email === input.email);
+
+          if (existingAuthUser) {
+            // User exists in Auth, just use their ID
+            userId = existingAuthUser.id;
+            console.log(`User ${input.email} already exists in Auth, using existing ID`);
+          } else {
+            // Create new user in Supabase Auth
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+              email: input.email,
+              password: input.password || Math.random().toString(36).slice(-8),
+              email_confirm: true,
+            });
+
+            if (authError) {
+              console.error('Erro ao criar usuario no Auth:', authError);
+              throw new Error(authError.message);
+            }
+
+            userId = authData.user?.id;
+          }
+
+          // Insert user in users table
+          const { data, error } = await supabase
+            .from('users')
+            .insert([{
+              uid: userId,
+              email: input.email,
+              name: input.name,
+              role: input.role,
+              login_method: 'email',
+            }])
+            .select();
+          
+          console.log('[tRPC] usuarios.create called with:', { email: input.email, role: input.role, usuario: ctx.user?.email });
+
+          if (error) {
+            console.error('Erro ao criar usuario:', error);
+            throw new Error(error.message);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'create',
+            descricao: `Usuário criado: ${input.email} (${input.role})`,
+            tipoDocumento: 'usuario',
+            idDocumento: data?.[0]?.id || 'unknown',
+            dadosDepois: { email: input.email, role: input.role },
+          });
+
+          return data?.[0];
+        } catch (error) {
+          console.error('Erro ao criar usuario:', error);
+          throw error;
+        }
+      }),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          email: z.string().email().optional(),
+          name: z.string().optional(),
+          role: z.enum(['adminmaster', 'admin', 'analista']).optional(),
+          password: z.string().min(6).optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const userRole = ctx.user?.role;
+
+        if (userRole === 'analista') {
+          throw new Error('Você não tem permissão para editar usuários');
+        }
+
+        // Only adminmaster can change passwords
+        if (input.password && userRole !== 'adminmaster') {
+          throw new Error('Apenas adminmaster pode alterar senhas de usuários');
+        }
+
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // Get current user data to check permissions
+          const { data: targetUser, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', input.id)
+            .single();
+
+          if (fetchError || !targetUser) {
+            throw new Error('Usuário não encontrado');
+          }
+
+          // Admin can edit admin and analista users
+          if (userRole === 'admin') {
+            if (targetUser.role === 'adminmaster') {
+              throw new Error('Você não pode editar usuários com perfil adminmaster');
+            }
+            if (input.role === 'adminmaster') {
+              throw new Error('Você não pode definir o perfil como adminmaster');
+            }
+          }
+
+          // If password is provided, update it in Auth
+          if (input.password) {
+            const { error: passwordError } = await supabase.auth.admin.updateUserById(
+              targetUser.auth_id,
+              { password: input.password }
+            );
+
+            if (passwordError) {
+              console.error('Erro ao atualizar senha:', passwordError);
+              throw new Error('Erro ao atualizar senha: ' + passwordError.message);
+            }
+          }
+
+          // Update user data in database (excluding password)
+          const { password, id, ...updateData } = input;
+          const { data, error } = await supabase
+            .from('users')
+            .update({
+              ...updateData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .select();
+
+          if (error) {
+            console.error('Erro ao atualizar usuario:', error);
+            throw new Error(error.message);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'update',
+            descricao: `Usuário atualizado: ${input.email || targetUser.email}${input.password ? ' (senha alterada)' : ''}`,
+            tipoDocumento: 'usuario',
+            idDocumento: String(input.id),
+            dadosAntes: { email: targetUser.email, role: targetUser.role },
+            dadosDepois: { email: input.email || targetUser.email, role: input.role || targetUser.role },
+          });
+          
+          return data?.[0];
+        } catch (error) {
+          console.error('Erro ao atualizar usuario:', error);
+          throw error;
+        }
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const userRole = ctx.user?.role;
+
+        if (userRole === 'analista') {
+          throw new Error('Você não tem permissão para deletar usuários');
+        }
+
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          // Get current user data to check permissions
+          const { data: targetUser, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', input.id)
+            .single();
+
+          if (fetchError || !targetUser) {
+            throw new Error('Usuário não encontrado');
+          }
+
+          // Admin can delete admin and analista users
+          if (userRole === 'admin') {
+            if (targetUser.role === 'adminmaster') {
+              throw new Error('Você não pode deletar usuários com perfil adminmaster');
+            }
+          }
+
+          // Delete from users table
+          const { error } = await supabase
+            .from('users')
+            .delete()
+            .eq('id', input.id);
+
+          if (error) {
+            console.error('Erro ao deletar usuario:', error);
+            throw new Error(error.message);
+          }
+
+          // Also delete from Supabase Auth if uid exists
+          if (targetUser.uid) {
+            await supabase.auth.admin.deleteUser(targetUser.uid);
+          }
+
+          // Log to audit
+          await logAuditEvent({
+            usuario: ctx.user?.email || 'unknown',
+            usuarioNome: ctx.user?.name,
+            acao: 'delete',
+            descricao: `Usuário deletado: ${targetUser.email} (${targetUser.role})`,
+            tipoDocumento: 'usuario',
+            idDocumento: String(input.id),
+            dadosAntes: { email: targetUser.email, role: targetUser.role },
+          });
+          
+          return { success: true };
+        } catch (error) {
+          console.error('Erro ao deletar usuario:', error);
+          throw error;
+        }
+      }),
+  }),
+
+  // Equipamentos Historico
+  equipamentos: router({
+    historico: protectedProcedure.query(async ({ ctx }) => {
+      try {
+        const { getAllEquipamentoHistorico } = await import('./db');
+        const data = await getAllEquipamentoHistorico();
+        return data;
+      } catch (error) {
+        console.error('[tRPC] Error fetching equipment history:', error);
+        throw error;
+      }
+    }),
+
+    historicoByTecnico: protectedProcedure
+      .input(z.object({ tecnicoId: z.string() }))
+      .query(async ({ input, ctx }) => {
+        try {
+          const { getEquipamentoHistoricoByTecnico } = await import('./db');
+          const data = await getEquipamentoHistoricoByTecnico(input.tecnicoId);
+          return data;
+        } catch (error) {
+          console.error('[tRPC] Error fetching equipment history by technician:', error);
+          throw error;
+        }
+      }),
+
+    historicoByStatus: protectedProcedure
+      .input(z.object({ status: z.enum(['emprestado', 'devolvido', 'usado_em_cliente']) }))
+      .query(async ({ input, ctx }) => {
+        try {
+          const { getEquipamentoHistoricoByStatus } = await import('./db');
+          const data = await getEquipamentoHistoricoByStatus(input.status);
+          return data;
+        } catch (error) {
+          console.error('[tRPC] Error fetching equipment by status:', error);
+          throw error;
+        }
+      }),
+
+    create: protectedProcedure
+      .input(z.object({
+        tecnicoId: z.string(),
+        equipamentoNome: z.string(),
+        equipamentoMarca: z.string().optional(),
+        equipamentoModelo: z.string().optional(),
+        equipamentoIdEstoque: z.string().optional(),
+        equipamentoDescricao: z.string().optional(),
+        status: z.enum(['emprestado', 'devolvido', 'usado_em_cliente']).optional(),
+        observacoes: z.string().optional(),
+        dataSaida: z.number().optional(),
+        dataDevolucao: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.VITE_SUPABASE_URL || '',
+            process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+          );
+          const { data, error } = await supabase
+            .from('tecnicos_equipamentos_historico')
+            .insert({
+              tecnico_id: input.tecnicoId,
+              equipamento_nome: input.equipamentoNome,
+              equipamento_modelo: input.equipamentoModelo,
+              equipamento_id_estoque: input.equipamentoIdEstoque,
+              observacoes: input.observacoes,
+              status: input.status || 'emprestado',
+              data_saida: input.dataSaida ? new Date(input.dataSaida).toISOString() : new Date().toISOString(),
+              data_devolucao: input.dataDevolucao ? new Date(input.dataDevolucao).toISOString() : null,
+            })
+            .select();
+          if (error) throw error;
+          return data?.[0] || null;
+        } catch (error) {
+          console.error('[tRPC] Error creating equipment history:', error);
+          throw error;
+        }
+      }),
+
+    markAsReturned: protectedProcedure
+      .input(z.object({ 
+        id: z.string(),
+        dataDevolucao: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const supabase = createClient(
+            process.env.VITE_SUPABASE_URL || "",
+            process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+          );
+          const { data, error } = await supabase
+            .from("tecnicos_equipamentos_historico")
+            .update({
+              status: "devolvido",
+              data_devolucao: input.dataDevolucao || new Date().toISOString(),
+            })
+            .eq("id", input.id)
+            .select();
+          if (error) throw error;
+          return data?.[0] || null;
+        } catch (error) {
+          console.error("[tRPC] Error marking equipment as returned:", error);
+          throw error;
+        }
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.string(),
+        equipamentoNome: z.string().optional(),
+        equipamentoModelo: z.string().optional(),
+        equipamentoIdEstoque: z.string().optional(),
+        observacoes: z.string().optional(),
+        dataSaida: z.string().optional(),
+        dataDevolucao: z.string().optional(),
+        status: z.string().optional(),
+        tecnicoId: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const supabase = createClient(
+            process.env.VITE_SUPABASE_URL || "",
+            process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+          );
+          const updateData: any = {};
+          if (input.equipamentoNome !== undefined) updateData.equipamento_nome = input.equipamentoNome;
+          if (input.equipamentoModelo !== undefined) updateData.equipamento_modelo = input.equipamentoModelo;
+          if (input.equipamentoIdEstoque !== undefined) updateData.equipamento_id_estoque = input.equipamentoIdEstoque;
+          if (input.observacoes !== undefined) updateData.observacoes = input.observacoes;
+          if (input.dataSaida !== undefined) updateData.data_saida = input.dataSaida;
+          if (input.dataDevolucao !== undefined) updateData.data_devolucao = input.dataDevolucao;
+          if (input.status !== undefined) updateData.status = input.status;
+          if (input.tecnicoId !== undefined) updateData.tecnico_id = input.tecnicoId;
+          const { data, error } = await supabase
+            .from("tecnicos_equipamentos_historico")
+            .update(updateData)
+            .eq("id", input.id)
+            .select();
+          if (error) throw error;
+          return data?.[0] || null;
+        } catch (error) {
+          console.error("[tRPC] Error updating equipment:", error);
+          throw error;
+        }
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { createClient } = await import("@supabase/supabase-js");
+          const supabase = createClient(
+            process.env.VITE_SUPABASE_URL || "",
+            process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+          );
+          // Soft delete: set status = 'deletado'
+          const { error } = await supabase
+            .from("tecnicos_equipamentos_historico")
+            .update({ equip_ativo: 'inativo' })
+            .eq("id", input.id);
+          if (error) throw error;
+          return { success: true };
+        } catch (error) {
+          console.error("[tRPC] Error deleting equipment:", error);
+          throw error;
+        }
+      }),
+  }),
+
+  profile: router({
+    getProfile: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user?.email) {
+        throw new Error('Usuario nao autenticado');
+      }
+
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        const { data, error } = await supabase
+          .from('users')
+          .select('id, name, email, role')
+          .eq('email', ctx.user.email)
+          .single();
+
+        if (error) {
+          console.error('[tRPC] Error fetching profile:', error);
+          throw new Error('Erro ao buscar perfil do usuario');
+        }
+
+        return {
+          id: data?.id,
+          name: data?.name || '',
+          email: data?.email || '',
+          role: data?.role || 'analista',
+        };
+      } catch (error) {
+        console.error('[tRPC] Error in getProfile:', error);
+        throw error;
+      }
+    }),
+
+    updateProfile: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1, 'Nome eh obrigatorio'),
+        password: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user?.email) {
+          throw new Error('Usuario nao autenticado');
+        }
+
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_SERVICE_ROLE_KEY!
+          );
+
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({ name: input.name })
+            .eq('email', ctx.user.email);
+
+          if (updateError) {
+            console.error('[tRPC] Error updating profile:', updateError);
+            throw new Error('Erro ao atualizar perfil');
+          }
+
+          if (input.password) {
+            const { error: passwordError } = await supabase.auth.admin.updateUserById(
+              ctx.user.openId,
+              { password: input.password }
+            );
+
+            if (passwordError) {
+              console.error('[tRPC] Error updating password:', passwordError);
+              throw new Error('Erro ao atualizar senha');
+            }
+          }
+
+          const timestamp = new Date().getTime();
+          const dataFormatada = new Date(timestamp).toLocaleString('pt-BR');
+          
+          await supabase.from('audit_logs').insert([{
+            timestamp,
+            data_formatada: dataFormatada,
+            usuario: ctx.user.email,
+            usuario_nome: input.name,
+            acao: 'atualizacao_perfil',
+            descricao: `${ctx.user.name || ctx.user.email} atualizou seu perfil`,
+            tipo_documento: 'login',
+            id_documento: ctx.user.openId || 'unknown',
+          }]);
+
+          return { success: true };
+        } catch (error) {
+          console.error('[tRPC] Error in updateProfile:', error);
+          throw error;
+        }
+      }),
+
+    validatePassword: protectedProcedure
+      .input(z.object({
+        currentPassword: z.string().min(1, 'Senha eh obrigatoria'),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user?.email) {
+          throw new Error('Usuario nao autenticado');
+        }
+
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const supabase = createClient(
+            process.env.SUPABASE_URL!,
+            process.env.SUPABASE_ANON_KEY!
+          );
+
+          const { error } = await supabase.auth.signInWithPassword({
+            email: ctx.user.email,
+            password: input.currentPassword,
+          });
+
+          if (error) {
+            console.error('[tRPC] Error validating password:', error);
+            throw new Error('Senha atual incorreta');
+          }
+
+          return { success: true };
+        } catch (error) {
+          console.error('[tRPC] Error in validatePassword:', error);
+          throw error;
+        }
+      }),
+  }),
+
+  console: router({
+    getLogs: protectedProcedure.query(async ({ ctx }) => {
+      const userRole = ctx.user?.role;
+
+      // Only admin and adminmaster can access console
+      if (userRole === 'analista') {
+        throw new Error('Você não tem permissão para acessar o console');
+      }
+
+      try {
+        const { getAuditLogsByRole } = await import('./db');
+        const logs = await getAuditLogsByRole(userRole || 'analista', 1000);
+        return logs;
+      } catch (error) {
+        console.error('[tRPC] Error fetching audit logs:', error);
+        throw error;
+      }
+    }),
+
+    getLogsByAction: protectedProcedure
+      .input(z.object({ acao: z.string() }))
+      .query(async ({ ctx, input }) => {
+        const userRole = ctx.user?.role;
+
+        if (userRole === 'analista') {
+          throw new Error('Você não tem permissão para acessar o console');
+        }
+
+        try {
+          const { getAuditLogs } = await import('./db');
+          let logs = await getAuditLogs(1000);
+          
+          // Filter by action
+          logs = logs.filter((log: any) => log.acao?.includes(input.acao));
+          
+          // Apply role-based filtering
+          if (userRole === 'admin') {
+            logs = logs.filter((log: any) => !log.acao?.includes('adminmaster'));
+          }
+          
+          return logs;
+        } catch (error) {
+          console.error('[tRPC] Error fetching audit logs by action:', error);
+          throw error;
+        }
+      }),
+  }),
+});
+
+export type AppRouter = typeof appRouter;

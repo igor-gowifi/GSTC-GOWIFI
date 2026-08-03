@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1769027804379,
+      "tag": "0000_green_jack_murdock",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1769045811576,
+      "tag": "0001_slippery_black_bird",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1769214007434,
+      "tag": "0002_brown_gabe_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1769427668696,
+      "tag": "0003_striped_talon",
+      "breakpoints": true
+    }
+  ]
+}
