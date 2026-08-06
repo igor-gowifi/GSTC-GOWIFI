@@ -130,8 +130,6 @@ export default function NovaSolicitacao() {
       { campo: 'servico', label: 'Serviço' },
       { campo: 'operadora', label: 'Operadora' },
       { campo: 'freshdesk', label: 'Freshdesk Ticket' },
-      { campo: 'contatoLocal', label: 'Contato Local' },
-      { campo: 'data', label: 'Data da Atividade' },
       { campo: 'cep', label: 'CEP' },
       { campo: 'rua', label: 'Rua' },
       { campo: 'numero', label: 'Número' },
@@ -252,9 +250,9 @@ export default function NovaSolicitacao() {
         servico: formData.servico,
         operadora: formData.operadora,
         freshdeskTicket: formData.freshdesk,
-        contatoLocal: formData.contatoLocal,
-        dataAtividade: formData.data,
-        horaAtividade: formData.hora || '',
+        contatoLocal: formData.contatoLocal ? formData.contatoLocal : null,
+        dataAtividade: formData.data ? formData.data : null,
+        horaAtividade: formData.hora ? formData.hora : null,
         cep: formData.cep,
         rua: formData.rua,
         numero: formData.numero,
@@ -327,198 +325,195 @@ export default function NovaSolicitacao() {
         <Card className="p-6">
           <form className="space-y-6">
 
-
             {/* Form Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* 1. Nome da Atividade */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Nome da Atividade *</label>
-              <Input
-                type="text"
-                placeholder="Ex: Brad#0001"
-                value={formData.nomeAtividade}
-                onChange={(e) => setFormData({ ...formData, nomeAtividade: e.target.value })}
-                className={errosValidacao.includes('Nome da Atividade') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 1. Nome da Atividade */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Nome da Atividade *</label>
+                <Input
+                  type="text"
+                  placeholder="Ex: Brad#0001"
+                  value={formData.nomeAtividade}
+                  onChange={(e) => setFormData({ ...formData, nomeAtividade: e.target.value })}
+                  className={errosValidacao.includes('Nome da Atividade') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 2. Grupo de Projeto */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Grupo de Projeto *</label>
-              <Select value={formData.grupoProjeto} onValueChange={(value) => setFormData({ ...formData, grupoProjeto: value })}>
-                <SelectTrigger className={errosValidacao.includes('Grupo de Projeto') ? 'border-red-500' : ''}>
-                  <SelectValue placeholder="Selecione um projeto" />
-                </SelectTrigger>
-                <SelectContent>
-                  {GRUPOS_PROJETO.map(grupo => (
-                    <SelectItem key={grupo} value={grupo}>{grupo}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              {/* 2. Grupo de Projeto */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Grupo de Projeto *</label>
+                <Select value={formData.grupoProjeto} onValueChange={(value) => setFormData({ ...formData, grupoProjeto: value })}>
+                  <SelectTrigger className={errosValidacao.includes('Grupo de Projeto') ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Selecione um projeto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GRUPOS_PROJETO.map(grupo => (
+                      <SelectItem key={grupo} value={grupo}>{grupo}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {/* 3. Serviço */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Serviço *</label>
-              <Select value={formData.servico} onValueChange={(value) => setFormData({ ...formData, servico: value })}>
-                <SelectTrigger className={errosValidacao.includes('Serviço') ? 'border-red-500' : ''}>
-                  <SelectValue placeholder="Selecione um serviço" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SERVICOS.map(servico => (
-                    <SelectItem key={servico} value={servico}>{servico}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              {/* 3. Serviço */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Serviço *</label>
+                <Select value={formData.servico} onValueChange={(value) => setFormData({ ...formData, servico: value })}>
+                  <SelectTrigger className={errosValidacao.includes('Serviço') ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Selecione um serviço" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SERVICOS.map(servico => (
+                      <SelectItem key={servico} value={servico}>{servico}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {/* 4. Operadora */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Operadora *</label>
-              <Select value={formData.operadora} onValueChange={(value) => setFormData({ ...formData, operadora: value })}>
-                <SelectTrigger className={errosValidacao.includes('Operadora') ? 'border-red-500' : ''}>
-                  <SelectValue placeholder="Selecionar operadora" />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPERADORAS.map((op) => (
-                    <SelectItem key={op} value={op}>{op}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              {/* 4. Operadora */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Operadora *</label>
+                <Select value={formData.operadora} onValueChange={(value) => setFormData({ ...formData, operadora: value })}>
+                  <SelectTrigger className={errosValidacao.includes('Operadora') ? 'border-red-500' : ''}>
+                    <SelectValue placeholder="Selecionar operadora" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OPERADORAS.map((op) => (
+                      <SelectItem key={op} value={op}>{op}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            {/* 5. Freshdesk Ticket */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Freshdesk Ticket *</label>
-              <Input
-                type="text"
-                placeholder="Ex: #12345"
-                value={formData.freshdesk}
-                onChange={(e) => setFormData({ ...formData, freshdesk: e.target.value })}
-                className={errosValidacao.includes('Freshdesk Ticket') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 5. Freshdesk Ticket */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Freshdesk Ticket *</label>
+                <Input
+                  type="text"
+                  placeholder="Ex: #12345"
+                  value={formData.freshdesk}
+                  onChange={(e) => setFormData({ ...formData, freshdesk: e.target.value })}
+                  className={errosValidacao.includes('Freshdesk Ticket') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 6. Contato Local */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Contato Local *</label>
-              <Input
-                type="text"
-                placeholder="Ex: João Silva"
-                value={formData.contatoLocal}
-                onChange={(e) => setFormData({ ...formData, contatoLocal: e.target.value })}
-                className={errosValidacao.includes('Contato Local') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 6. Contato Local */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Contato Local</label>
+                <Input
+                  type="text"
+                  placeholder="Ex: João Silva"
+                  value={formData.contatoLocal}
+                  onChange={(e) => setFormData({ ...formData, contatoLocal: e.target.value })}
+                />
+              </div>
 
-            {/* 7. Data da Atividade */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Data da Atividade *</label>
-              <Input
-                type="date"
-                value={formData.data}
-                onChange={(e) => setFormData({ ...formData, data: e.target.value })}
-                className={errosValidacao.includes('Data da Atividade') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 7. Data da Atividade */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Data da Atividade</label>
+                <Input
+                  type="date"
+                  value={formData.data}
+                  onChange={(e) => setFormData({ ...formData, data: e.target.value })}
+                />
+              </div>
 
-            {/* 8. Hora da Atividade */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Hora da Atividade</label>
-              <Input
-                type="time"
-                value={formData.hora}
-                onChange={(e) => setFormData({ ...formData, hora: e.target.value })}
-              />
-            </div>
+              {/* 8. Hora da Atividade */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Hora da Atividade</label>
+                <Input
+                  type="time"
+                  value={formData.hora}
+                  onChange={(e) => setFormData({ ...formData, hora: e.target.value })}
+                />
+              </div>
 
-            {/* 9. CEP */}
-            <div>
-              <label className="block text-sm font-medium mb-1">CEP *</label>
-              <Input
-                type="text"
-                placeholder="00000-000"
-                maxLength={9}
-                value={formData.cep}
-                onChange={(e) => {
-                  const cep = aplicarMascaraCEP(e.target.value);
-                  setFormData({ ...formData, cep });
-                }}
-                onBlur={() => {
-                  if (formData.cep.length === 9) {
-                    handleBuscarCEP(formData.cep.replace('-', ''));
-                  }
-                }}
-                className={errosValidacao.includes('CEP') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 9. CEP */}
+              <div>
+                <label className="block text-sm font-medium mb-1">CEP *</label>
+                <Input
+                  type="text"
+                  placeholder="00000-000"
+                  maxLength={9}
+                  value={formData.cep}
+                  onChange={(e) => {
+                    const cep = aplicarMascaraCEP(e.target.value);
+                    setFormData({ ...formData, cep });
+                  }}
+                  onBlur={() => {
+                    if (formData.cep.length === 9) {
+                      handleBuscarCEP(formData.cep.replace('-', ''));
+                    }
+                  }}
+                  className={errosValidacao.includes('CEP') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 10. Rua */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Rua *</label>
-              <Input
-                type="text"
-                value={formData.rua}
-                onChange={(e) => setFormData({ ...formData, rua: e.target.value })}
-                className={errosValidacao.includes('Rua') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 10. Rua */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Rua *</label>
+                <Input
+                  type="text"
+                  value={formData.rua}
+                  onChange={(e) => setFormData({ ...formData, rua: e.target.value })}
+                  className={errosValidacao.includes('Rua') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 11. Número */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Número *</label>
-              <Input
-                type="text"
-                value={formData.numero}
-                onChange={(e) => setFormData({ ...formData, numero: e.target.value })}
-                className={errosValidacao.includes('Número') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 11. Número */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Número *</label>
+                <Input
+                  type="text"
+                  value={formData.numero}
+                  onChange={(e) => setFormData({ ...formData, numero: e.target.value })}
+                  className={errosValidacao.includes('Número') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 12. Complemento */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Complemento</label>
-              <Input
-                type="text"
-                value={formData.complemento}
-                onChange={(e) => setFormData({ ...formData, complemento: e.target.value })}
-              />
-            </div>
+              {/* 12. Complemento */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Complemento</label>
+                <Input
+                  type="text"
+                  value={formData.complemento}
+                  onChange={(e) => setFormData({ ...formData, complemento: e.target.value })}
+                />
+              </div>
 
-            {/* 13. Bairro */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Bairro *</label>
-              <Input
-                type="text"
-                value={formData.bairro}
-                onChange={(e) => setFormData({ ...formData, bairro: e.target.value })}
-                className={errosValidacao.includes('Bairro') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 13. Bairro */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Bairro *</label>
+                <Input
+                  type="text"
+                  value={formData.bairro}
+                  onChange={(e) => setFormData({ ...formData, bairro: e.target.value })}
+                  className={errosValidacao.includes('Bairro') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 14. Cidade */}
-            <div>
-              <label className="block text-sm font-medium mb-1">Cidade *</label>
-              <Input
-                type="text"
-                value={formData.cidade}
-                onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
-                className={errosValidacao.includes('Cidade') ? 'border-red-500' : ''}
-              />
-            </div>
+              {/* 14. Cidade */}
+              <div>
+                <label className="block text-sm font-medium mb-1">Cidade *</label>
+                <Input
+                  type="text"
+                  value={formData.cidade}
+                  onChange={(e) => setFormData({ ...formData, cidade: e.target.value })}
+                  className={errosValidacao.includes('Cidade') ? 'border-red-500' : ''}
+                />
+              </div>
 
-            {/* 15. UF */}
-            <div>
-              <label className="block text-sm font-medium mb-1">UF *</label>
-              <Input
-                type="text"
-                maxLength={2}
-                value={formData.uf}
-                onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
-                className={errosValidacao.includes('UF') ? 'border-red-500' : ''}
-              />
+              {/* 15. UF */}
+              <div>
+                <label className="block text-sm font-medium mb-1">UF *</label>
+                <Input
+                  type="text"
+                  maxLength={2}
+                  value={formData.uf}
+                  onChange={(e) => setFormData({ ...formData, uf: e.target.value.toUpperCase() })}
+                  className={errosValidacao.includes('UF') ? 'border-red-500' : ''}
+                />
+              </div>
             </div>
-          </div>
 
             {/* Botão Buscar Técnicos - Oculto para Analista */}
             {user?.role !== 'analista' && (
