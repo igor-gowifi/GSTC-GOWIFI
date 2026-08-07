@@ -15,7 +15,7 @@ import { formatDatePtBr, formatTimePtBr } from '@/lib/dateFormatter';
 import { useAuth } from '@/_core/hooks/useAuth';
 import Fuse from 'fuse.js';
 
-const ITEMS_PER_PAGE = 25;
+const ITEMS_PER_PAGE = 50;
 
 type SortOption = 'data-criacao-desc' | 'data-criacao-asc' | 'data-atividade-desc' | 'data-atividade-asc' | 'data-conclusao-desc' | 'data-conclusao-asc' | 'status-asc' | 'status-desc';
 
@@ -57,6 +57,7 @@ export default function Solicitacoes() {
       searchTerm: '', // Empty search - we'll use Fuse.js on client
       status: filters.status || '',
       projeto: filters.projeto || '',
+      servico: filters.servico || '',
       dia: filters.dia as any,
       semana: filters.semana as any,
       sortBy: sortBy || '',
@@ -79,6 +80,7 @@ export default function Solicitacoes() {
   const projetos = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_projeto).filter(Boolean)));
   const statuses = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_status).filter(Boolean)));
   const empresas = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_empresa_parceira).filter(Boolean)));
+  const servicos = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_servico).filter(Boolean)));
 
   // Fuse.js fuzzy search
   const fuseSearchResults = useMemo(() => {
