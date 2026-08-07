@@ -1,18 +1,17 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertCircle, Search, Save, MapPin, AlertTriangle, Star, Phone, Wrench } from 'lucide-react';
+import { Search, Save, AlertTriangle, UserCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { trpc } from '@/lib/trpc';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { useLocation } from 'wouter';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { geocodeAddress } from '@/utils/geocodeAddress';
-import { aplicarMascaraCEP, aplicarMascaraTelefone } from '@/utils/masks';
-
-import { Badge } from '@/components/ui/badge';
+import { aplicarMascaraCEP } from '@/utils/masks';
+import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
 
 const GRUPOS_PROJETO = [
   'WiFi Seguro',
@@ -44,21 +43,11 @@ const OPERADORAS = [
   'Outro',
 ];
 
-// Calcular distância em km usando Haversine
-const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Raio da Terra em km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c * 10) / 10; // Arredondar para 1 casa decimal
-};
-
 export default function NovaSolicitacao() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+
+  // 1. Estado Unificado do Formulário
   const [formData, setFormData] = useState({
     nomeAtividade: '',
     grupoProjeto: '',
@@ -77,21 +66,25 @@ export default function NovaSolicitacao() {
     uf: '',
   });
 
+  // 2. Estados de Controle
   const [buscandoCEP, setBuscandoCEP] = useState(false);
-  const [buscandoTecnicos, setBuscandoTecnicos] = useState(false);
   const [salvando, setSalvando] = useState(false);
-  const [tecnicosEncontrados, setTecnicosEncontrados] = useState<any[]>([]);
-  const [mostraTecnicos, setMostraTecnicos] = useState(false);
-  const [tecnicoSelecionado, setTecnicoSelecionado] = useState<string | null>(null);
-  const [coordenadas, setCoordenadas] = useState<{ lat: number; lon: number } | null>(null);
   const [errosValidacao, setErrosValidacao] = useState<string[]>([]);
 
+  // 3. Estados do Modal e Técnico Selecionado
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [coordsBusca, setCoordsBusca] = useState<{ lat: number; lng: number } | null>(null);
+  const [tecnicoSelecionado, setTecnicoSelecionado] = useState<{ id: string; tec_nome: string } | null>(null);
+
+  // Queries e Mutations
   const createMutation = trpc.solicitacoes.create.useMutation();
-  const [queryCoords, setQueryCoords] = useState({ latitude: 0, longitude: 0 });
-  const { data: tecnicosQuery } = trpc.solicitacoes.findNearestTecnicos.useQuery(
-    queryCoords,
-    { enabled: queryCoords.latitude !== 0 && queryCoords.longitude !== 0 }
-  );
+
+  // Busca técnicos com base nas coordenadas calculadas (executa apenas quando coordsBusca existir)
+  const { data: tecnicosData, isLoading: isLoadingTecnicos } = trpc.tecnicos.buscarProximos?.useQuery(
+    { lat: coordsBusca?.lat ?? 0, lng: coordsBusca?.lng ?? 0 },
+    { enabled: !!coordsBusca }
+  ) ?? { data: [], isLoading: false };
 
   // Buscar endereço por CEP
   const handleBuscarCEP = async (cepValue: string) => {
@@ -153,13 +146,15 @@ export default function NovaSolicitacao() {
     return true;
   };
 
-  // Buscar técnicos próximos
-  const buscarProximosTecnicos = async () => {
-    if (!validarFormulario()) return;
+  // Abrir o modal de busca acionando a geocodificação do endereço do formulário
+  const handleAbrirBuscaTecnicos = async () => {
+    if (!formData.cep || !formData.rua || !formData.cidade || !formData.uf) {
+      toast.error('Preencha os campos de endereço antes de buscar técnicos.');
+      return;
+    }
 
-    setBuscandoTecnicos(true);
+    setIsGeocoding(true);
     try {
-      // Geocodificar endereço usando o utility
       const coords = await geocodeAddress({
         tec_cep: formData.cep,
         tec_rua: formData.rua,
@@ -170,67 +165,18 @@ export default function NovaSolicitacao() {
       });
 
       if (!coords) {
-        toast.error('Não foi possível geocodificar o endereço');
-        setBuscandoTecnicos(false);
+        toast.error('Não foi possível localizar as coordenadas para este endereço.');
         return;
       }
 
-      setCoordenadas({ lat: coords.lat, lon: coords.lng });
-
-      // Buscar técnicos próximos via query
-      setQueryCoords({ latitude: coords.lat, longitude: coords.lng });
-
-      toast.success('Técnicos próximos encontrados');
+      setCoordsBusca({ lat: coords.lat, lng: coords.lng });
+      setIsModalOpen(true);
     } catch (error) {
-      console.error('Erro ao buscar técnicos:', error);
-      toast.error('Erro ao buscar técnicos próximos');
+      console.error('Erro ao geocodificar:', error);
+      toast.error('Erro ao processar localização do endereço.');
     } finally {
-      setBuscandoTecnicos(false);
+      setIsGeocoding(false);
     }
-  };
-
-  // Handle tecnicosQuery update
-  useEffect(() => {
-    if (tecnicosQuery && tecnicosQuery.length > 0 && coordenadas) {
-      // Adicionar distância a cada técnico
-      const tecnicosComDistancia = (tecnicosQuery || []).map((tecnico: any) => {
-        // Converter decimal strings para números se necessário
-        const tecLat = typeof tecnico.tec_latitude === 'string' ? parseFloat(tecnico.tec_latitude) : 
-                       typeof tecnico.latitude === 'string' ? parseFloat(tecnico.latitude) : 
-                       (tecnico.tec_latitude || tecnico.latitude || 0);
-        const tecLon = typeof tecnico.tec_longitude === 'string' ? parseFloat(tecnico.tec_longitude) : 
-                       typeof tecnico.longitude === 'string' ? parseFloat(tecnico.longitude) : 
-                       (tecnico.tec_longitude || tecnico.longitude || 0);
-        
-        return {
-          ...tecnico,
-          distancia: tecLat && tecLon ? calcularDistancia(coordenadas.lat, coordenadas.lon, tecLat, tecLon) : null,
-        };
-      });
-
-      // Filtrar técnicos sem coordenadas e ordenar por distância
-      const tecnicosComDistanciaValida = tecnicosComDistancia
-        .filter(t => t.distancia !== null)
-        .sort((a, b) => (a.distancia || 0) - (b.distancia || 0));
-
-      setTecnicosEncontrados(tecnicosComDistanciaValida);
-      setMostraTecnicos(true);
-
-      if (tecnicosComDistancia.length > 0) {
-        toast.success(`${tecnicosComDistancia.length} técnico(s) encontrado(s)`);
-      } else {
-        toast.warning('Nenhum técnico encontrado próximo a este endereço');
-      }
-    }
-  }, [tecnicosQuery, coordenadas]);
-
-  // Abrir Google Maps
-  const abrirMapa = (tecnico: any) => {
-    if (!coordenadas) return;
-    const tecLat = tecnico.tec_latitude;
-    const tecLon = tecnico.tec_longitude;
-    const url = `https://www.google.com/maps/dir/${coordenadas.lat},${coordenadas.lon}/${tecLat},${tecLon}`;
-    window.open(url, '_blank');
   };
 
   // Salvar solicitação
@@ -244,15 +190,15 @@ export default function NovaSolicitacao() {
 
     setSalvando(true);
     try {
-      const resultado = await createMutation.mutateAsync({
+      await createMutation.mutateAsync({
         nomeAtividade: formData.nomeAtividade,
         grupoProjeto: formData.grupoProjeto,
         servico: formData.servico,
         operadora: formData.operadora,
         freshdeskTicket: formData.freshdesk,
-        contatoLocal: formData.contatoLocal ? formData.contatoLocal : null,
-        dataAtividade: formData.data ? formData.data : null,
-        horaAtividade: formData.hora ? formData.hora : null,
+        contatoLocal: formData.contatoLocal || null,
+        dataAtividade: formData.data || null,
+        horaAtividade: formData.hora || null,
         cep: formData.cep,
         rua: formData.rua,
         numero: formData.numero,
@@ -260,12 +206,11 @@ export default function NovaSolicitacao() {
         bairro: formData.bairro,
         cidade: formData.cidade,
         uf: formData.uf,
-        tecnicoId: tecnicoSelecionado || null,
+        tecnicoId: tecnicoSelecionado?.id || null,
       });
 
       toast.success('Solicitação criada com sucesso!');
       
-      // Navegar para aba Solicitações
       setTimeout(() => setLocation('/solicitacoes'), 500);
       
       // Limpar formulário
@@ -286,10 +231,7 @@ export default function NovaSolicitacao() {
         cidade: '',
         uf: '',
       });
-      setTecnicosEncontrados([]);
-      setMostraTecnicos(false);
       setTecnicoSelecionado(null);
-      setCoordenadas(null);
       setErrosValidacao([]);
     } catch (error) {
       console.error('Erro ao salvar solicitação:', error);
@@ -517,108 +459,44 @@ export default function NovaSolicitacao() {
 
             {/* Botão Buscar Técnicos - Oculto para Analista */}
             {user?.role !== 'analista' && (
-              <Button
-                type="button"
-                onClick={buscarProximosTecnicos}
-                disabled={buscandoTecnicos}
-                className="w-full"
-                size="lg"
-              >
-                <Search className="w-4 h-4 mr-2" />
-                {buscandoTecnicos ? 'Buscando...' : 'Buscar Técnicos Próximos'}
-              </Button>
-            )}
+              <div className="space-y-3 pt-2">
+                <Button
+                  type="button"
+                  onClick={handleAbrirBuscaTecnicos}
+                  disabled={isGeocoding}
+                  className="w-full"
+                  size="lg"
+                  variant="outline"
+                >
+                  <Search className="w-4 h-4 mr-2" />
+                  {isGeocoding ? 'Obtendo coordenadas do endereço...' : 'Buscar Técnicos Próximos'}
+                </Button>
 
-            {/* Lista de Técnicos */}
-            {mostraTecnicos && tecnicosEncontrados.length > 0 && (
-              <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-                <h3 className="font-semibold text-lg">Técnicos Próximos Encontrados ({tecnicosEncontrados.length})</h3>
-                <div className="grid gap-4">
-                  {tecnicosEncontrados.map((tecnico) => (
-                    <Card
-                      key={tecnico.id}
-                      className={`p-4 md:p-6 hover:shadow-lg transition cursor-pointer border-2 ${
-                        tecnicoSelecionado === tecnico.id
-                          ? 'border-blue-500 bg-blue-50 dark:bg-slate-800 dark:border-blue-400 shadow-md'
-                          : 'border-transparent'
-                      }`}
-                      onClick={() => setTecnicoSelecionado(tecnico.id)}
-                    >
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* Info Técnico */}
-                        <div className="space-y-3">
-                          <div>
-                            <h3 className="font-semibold text-lg">{tecnico.tec_nome}</h3>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-sm font-semibold text-blue-600">
-                                {(tecnico.tec_avaliacao || 0).toFixed(2)}
-                              </span>
-                              <span className="text-xs text-muted-foreground">/5.0</span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2 text-sm">
-                            <div className="flex items-center gap-2">
-                              <Phone className="w-4 h-4 text-muted-foreground" />
-                              <span>{tecnico.tec_telefone}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 pt-2">
-                            {tecnico.tec_empresa_parceira && (
-                              <Badge variant="secondary">{tecnico.tec_empresa_parceira}</Badge>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Endereço e Distância */}
-                        <div className="space-y-3">
-                          <div className="flex items-start gap-2">
-                            <MapPin className="w-4 h-4 text-muted-foreground mt-1 flex-shrink-0" />
-                            <div className="text-sm">
-                              <p>{tecnico.tec_rua}, {tecnico.tec_numero}</p>
-                              <p className="text-muted-foreground">{tecnico.tec_bairro}, {tecnico.tec_cidade} - {tecnico.tec_uf}</p>
-                            </div>
-                          </div>
-
-                          <div className="pt-2 border-t">
-                            <p className="text-sm text-muted-foreground mb-2">Distância aproximada:</p>
-                            <p className="text-lg font-semibold text-blue-600">
-                              {tecnico.distancia ? `${tecnico.distancia.toFixed(1)} km` : 'N/A'}
-                            </p>
-                          </div>
-
-                          <Button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              abrirMapa(tecnico);
-                            }}
-                            variant="outline"
-                            size="sm"
-                            className="w-full"
-                          >
-                            Ver no Mapa
-                          </Button>
-                        </div>
+                {/* Card de confirmação do Técnico Selecionado via Modal */}
+                {tecnicoSelecionado && (
+                  <div className="p-4 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <UserCheck className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                      <div>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 font-semibold uppercase tracking-wider">
+                          Técnico Vinculado
+                        </p>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {tecnicoSelecionado.tec_nome}
+                        </p>
                       </div>
-
-                      {tecnico.tec_observacoes && (
-                        <div className="mt-4 pt-4 border-t">
-                          <p className="text-sm text-muted-foreground"><strong>Observações:</strong> {tecnico.tec_observacoes}</p>
-                        </div>
-                      )}
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {mostraTecnicos && tecnicosEncontrados.length === 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex gap-3">
-                <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm text-yellow-800">Nenhum técnico encontrado próximo a este endereço.</p>
-                </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setTecnicoSelecionado(null)}
+                      className="text-slate-500 hover:text-red-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -626,7 +504,7 @@ export default function NovaSolicitacao() {
             <Button
               type="button"
               onClick={handleSalvar}
-              disabled={salvando || buscandoTecnicos}
+              disabled={salvando}
               className="w-full bg-green-600 hover:bg-green-700"
               size="lg"
             >
@@ -636,6 +514,20 @@ export default function NovaSolicitacao() {
           </form>
         </Card>
       </div>
+
+      {/* Modal de Busca de Técnicos Próximos */}
+      <TechnicianSearchModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        technicians={tecnicosData ?? []}
+        isLoading={isLoadingTecnicos}
+        currentTechnicianId={tecnicoSelecionado?.id}
+        onSelectTechnician={(tec) => {
+          setTecnicoSelecionado({ id: tec.id, tec_nome: tec.tec_nome });
+          setIsModalOpen(false);
+          toast.success(`Técnico ${tec.tec_nome} selecionado!`);
+        }}
+      />
     </div>
   );
 }

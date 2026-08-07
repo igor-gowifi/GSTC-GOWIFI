@@ -17,7 +17,8 @@ interface Technician {
   tec_bairro: string;
   tec_cidade: string;
   tec_uf: string;
-  distancia?: number;
+  distanciaKm?: number; // Propriedade vinda do serviço centralizado
+  distancia?: number;   // Mantido para compatibilidade legada
   latitude?: number;
   longitude?: number;
 }
@@ -26,8 +27,8 @@ interface TechnicianSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTechnician: (technician: Technician) => void;
-  technicians: Technician[];
-  isLoading: boolean;
+  technicians?: Technician[];
+  isLoading?: boolean;
   currentTechnicianId?: string;
 }
 
@@ -35,13 +36,18 @@ export function TechnicianSearchModal({
   isOpen,
   onClose,
   onSelectTechnician,
-  technicians,
-  isLoading,
+  technicians = [],
+  isLoading = false,
   currentTechnicianId,
 }: TechnicianSearchModalProps) {
   const [sortBy, setSortBy] = useState<'distance' | 'rating'>('distance');
 
   const sortedTechnicians = useMemo(() => {
+    // Trava de segurança: garante que technicians é um array iterável antes de espalhar
+    if (!technicians || !Array.isArray(technicians)) {
+      return [];
+    }
+
     const sorted = [...technicians];
     
     if (sortBy === 'rating') {
@@ -51,7 +57,11 @@ export function TechnicianSearchModal({
         return ratingB - ratingA;
       });
     } else {
-      sorted.sort((a, b) => (a.distancia || 0) - (b.distancia || 0));
+      sorted.sort((a, b) => {
+        const distA = a.distanciaKm ?? a.distancia ?? Infinity;
+        const distB = b.distanciaKm ?? b.distancia ?? Infinity;
+        return distA - distB;
+      });
     }
     
     return sorted;
@@ -137,7 +147,9 @@ interface TechnicianCardProps {
 
 function TechnicianCard({ technician, isSelected, onSelect, sortBy }: TechnicianCardProps) {
   const rating = parseFloat(String(technician.tec_avaliacao)) || 0;
-  const distance = technician.distancia || 0;
+  
+  // Prioriza distanciaKm e faz fallback para distancia se existir
+  const distance = technician.distanciaKm ?? technician.distancia;
 
   return (
     <Card
@@ -179,7 +191,7 @@ function TechnicianCard({ technician, isSelected, onSelect, sortBy }: Technician
           </div>
 
           <Badge variant="secondary">
-            {distance.toFixed(1)} km
+            {distance !== undefined ? `${distance.toFixed(1)} km` : 'N/A'}
           </Badge>
 
           <Button

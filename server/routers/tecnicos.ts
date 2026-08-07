@@ -31,6 +31,84 @@ export const tecnicosRouter = router({
     }
   }),
 
+  // Procedure para calcular técnicos mais próximos com base em coordenadas (Lat/Lng)
+  buscarProximos: protectedProcedure
+    .input(
+      z.object({
+        lat: z.number(),
+        lng: z.number(),
+      })
+    )
+    .query(async ({ input }) => {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!
+        );
+
+        // Busca todos os técnicos ativos
+        const { data: tecnicos, error } = await supabase
+          .from('tecnicos')
+          .select('*')
+          .eq('tec_ativo', true);
+
+        if (error) {
+          console.error('Erro ao buscar técnicos próximos:', error);
+          throw new Error(error.message);
+        }
+
+        if (!tecnicos || tecnicos.length === 0) return [];
+
+        // Função Haversine para calcular distância em Km
+        const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+          const R = 6371; // Raio da Terra em km
+          const dLat = ((lat2 - lat1) * Math.PI) / 180;
+          const dLon = ((lon2 - lon1) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos((lat1 * Math.PI) / 180) *
+              Math.cos((lat2 * Math.PI) / 180) *
+              Math.sin(dLon / 2) *
+              Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return R * c;
+        };
+
+        // Mapeia adicionando a distância calculada e propriedades compativeis com o modal
+        const tecnicosComDistancia = tecnicos.map((tec) => {
+          let distancia: number | null = null;
+
+          if (tec.tec_latitude && tec.tec_longitude) {
+            distancia = calcularDistancia(
+              input.lat,
+              input.lng,
+              Number(tec.tec_latitude),
+              Number(tec.tec_longitude)
+            );
+          }
+
+          const distCalculada = distancia !== null ? Math.round(distancia * 10) / 10 : undefined;
+
+          return {
+            ...tec,
+            distancia: distCalculada,
+            distanciaKm: distCalculada,
+          };
+        });
+
+        // Ordena pelos mais próximos (técnicos sem coordenada vão para o final)
+        return tecnicosComDistancia.sort((a, b) => {
+          if (a.distancia === undefined) return 1;
+          if (b.distancia === undefined) return -1;
+          return a.distancia - b.distancia;
+        });
+      } catch (error) {
+        console.error('Erro em buscarProximos:', error);
+        throw error;
+      }
+    }),
+
   create: protectedProcedure
     .input(
       z.object({

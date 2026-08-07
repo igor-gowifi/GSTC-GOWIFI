@@ -4,25 +4,13 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { Star, Phone, MapPin, Wrench, AlertCircle, Search, Loader2 } from 'lucide-react';
+import { Phone, MapPin, AlertCircle, Search, Loader2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { aplicarMascaraCEP } from '@/utils/masks';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { geocodeAddress } from '@/utils/geocodeAddress';
+import { useNearbyTechnicians } from '@/hooks/useNearbyTechnicians';
 import { toast } from 'sonner';
-import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
-
-// Calcular distância em km usando Haversine
-const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Raio da Terra em km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c * 10) / 10; // Arredondar para 1 casa decimal
-};
 
 export default function Consulta() {
   const [formData, setFormData] = useState({
@@ -35,20 +23,17 @@ export default function Consulta() {
     uf: ''
   });
 
-  const [tecnicosEncontrados, setTecnicosEncontrados] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [showResults, setShowResults] = useState(false);
   const [erro, setErro] = useState('');
   const [buscandoCEP, setBuscandoCEP] = useState(false);
-  const [queryCoords, setQueryCoords] = useState({ latitude: 0, longitude: 0 });
+  const [hasSearched, setHasSearched] = useState(false);
 
-  // Use query with dynamic coordinates
-  const { data: tecnicosQuery } = trpc.solicitacoes.findNearestTecnicos.useQuery(
-    queryCoords,
-    { enabled: queryCoords.latitude !== 0 && queryCoords.longitude !== 0 }
-  );
+  // Hook isolado/centralizado de busca de técnicos próximos
+  const { nearbyTecnicos, isSearching, searchTechnicians } = useNearbyTechnicians();
 
-  // Auto-complete de endereço quando CEP é digitado (sem formatação)
+  // Busca todos os técnicos cadastrados
+  const { data: todosTecnicos = [], isLoading: carregandoTecnicos } = trpc.tecnicos.list.useQuery();
+
+  // Auto-complete de endereço quando o CEP atinge 8 dígitos
   useEffect(() => {
     const cepLimpo = formData.cep.replace(/\D/g, '');
     if (cepLimpo.length === 8) {
@@ -56,22 +41,11 @@ export default function Consulta() {
     }
   }, [formData.cep]);
 
-  // Update results when query data changes
-  useEffect(() => {
-    if (tecnicosQuery && tecnicosQuery.length > 0) {
-      setTecnicosEncontrados(tecnicosQuery);
-      setShowResults(true);
-      setErro('');
-      toast.success(`${tecnicosQuery.length} técnico(s) encontrado(s)!`);
-      setLoading(false);
-    }
-  }, [tecnicosQuery]);
-
   const buscarEnderecoCEP = async (cep: string) => {
     try {
       setBuscandoCEP(true);
       const endereco = await buscarEnderecoPorCEP(cep);
-      
+
       if (endereco) {
         const enderecoConvertido = converterEnderecoViaCEP(endereco);
         setFormData(prev => ({
@@ -105,19 +79,13 @@ export default function Consulta() {
     return true;
   };
 
-  const buscarTecnicosProximos = async () => {
-    console.log('[Consulta] buscarTecnicosProximos called');
-    if (!validarEndereco()) {
-      console.warn('[Consulta] Endereco validation failed');
-      return;
-    }
+  const handleBuscarTecnicosProximos = async () => {
+    if (!validarEndereco()) return;
 
     try {
-      setLoading(true);
-      setShowResults(false);
-
-      // Geocodificar o endereço usando o utility
-      console.log('[Consulta] Geocoding address...');
+      setErro('');
+      
+      // 1. Converte o endereço digitado em coordenadas Lat/Lng
       const coords = await geocodeAddress({
         tec_cep: formData.cep,
         tec_rua: formData.rua,
@@ -128,26 +96,27 @@ export default function Consulta() {
       });
 
       if (!coords) {
-        console.warn('[Consulta] No geocoding results');
-        setErro('Não foi possível geocodificar o endereço. Tente novamente.');
-        setLoading(false);
+        setErro('Não foi possível geocodificar o endereço. Verifique as informações digitadas.');
         return;
       }
 
-      console.log('[Consulta] Geocoded coordinates:', { lat: coords.lat, lng: coords.lng });
+      // 2. Executa a busca centralizada retornando até 5 técnicos ordenados por distância
+      await searchTechnicians(
+        todosTecnicos,
+        { lat: coords.lat, lng: coords.lng },
+        5 // Retorna até 5 técnicos independente da distância
+      );
 
-      // Set coordinates to trigger query
-      console.log('[Consulta] Setting query coordinates');
-      setQueryCoords({ latitude: coords.lat, longitude: coords.lng });
+      setHasSearched(true);
+      toast.success('Busca de técnicos realizada!');
     } catch (err) {
-      console.error('[Consulta] Erro ao buscar técnicos:', err);
-      setErro('Erro ao buscar técnicos próximos. Tente novamente.');
-      toast.error('Erro ao buscar técnicos');
-      setLoading(false);
+      console.error('Erro ao buscar técnicos:', err);
+      setErro('Erro ao realizar a busca de técnicos próximos.');
+      toast.error('Erro na busca');
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -177,12 +146,9 @@ export default function Consulta() {
           <p className="text-sm md:text-base text-muted-foreground">Busque os técnicos mais próximos de um endereço</p>
         </div>
 
-
-
         {/* Formulário */}
         <Card className="p-4 md:p-6 mb-6">
           <div className="space-y-4">
-            {/* Erro */}
             {erro && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -213,7 +179,7 @@ export default function Consulta() {
               </div>
             </div>
 
-            {/* Endereço - Grid */}
+            {/* Endereço Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">
@@ -297,15 +263,15 @@ export default function Consulta() {
 
             {/* Botão Buscar */}
             <Button
-              onClick={buscarTecnicosProximos}
-              disabled={loading}
+              onClick={handleBuscarTecnicosProximos}
+              disabled={isSearching || carregandoTecnicos}
               className="w-full mt-4"
               size="lg"
             >
-              {loading ? (
+              {isSearching ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Buscando técnicos...
+                  Calculando distâncias...
                 </>
               ) : (
                 <>
@@ -318,20 +284,22 @@ export default function Consulta() {
         </Card>
 
         {/* Resultados */}
-        {showResults && (
+        {hasSearched && (
           <div className="space-y-4">
-            <h2 className="text-xl font-semibold">Técnicos Encontrados ({tecnicosEncontrados.length})</h2>
-            
-            {tecnicosEncontrados.length === 0 ? (
+            <h2 className="text-xl font-semibold">
+              Técnicos Encontrados ({nearbyTecnicos.length})
+            </h2>
+
+            {nearbyTecnicos.length === 0 ? (
               <Card className="p-8 text-center">
-                <p className="text-muted-foreground mb-4">Nenhum técnico encontrado na região.</p>
+                <p className="text-muted-foreground">Nenhum técnico encontrado com coordenadas válidas.</p>
               </Card>
             ) : (
               <div className="grid gap-4">
-                {tecnicosEncontrados.map((tecnico) => (
+                {nearbyTecnicos.map((tecnico) => (
                   <Card key={tecnico.id} className="p-4 md:p-6 hover:shadow-lg transition">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Info Técnico */}
+                      {/* Info do Técnico */}
                       <div className="space-y-3">
                         <div>
                           <h3 className="font-semibold text-lg">{tecnico.tec_nome}</h3>
@@ -346,7 +314,7 @@ export default function Consulta() {
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center gap-2">
                             <Phone className="w-4 h-4 text-muted-foreground" />
-                            <span>{tecnico.tec_telefone}</span>
+                            <span>{tecnico.tec_telefone || 'Sem telefone'}</span>
                           </div>
                         </div>
 
@@ -368,9 +336,9 @@ export default function Consulta() {
                         </div>
 
                         <div className="pt-2 border-t">
-                          <p className="text-sm text-muted-foreground mb-2">Distância aproximada:</p>
+                          <p className="text-sm text-muted-foreground mb-1">Distância aproximada:</p>
                           <p className="text-lg font-semibold text-blue-600">
-                            {tecnico.distancia ? `${tecnico.distancia.toFixed(1)} km` : 'N/A'}
+                            {tecnico.distanciaKm !== undefined ? `${tecnico.distanciaKm.toFixed(1)} km` : 'N/A'}
                           </p>
                         </div>
 
@@ -387,7 +355,9 @@ export default function Consulta() {
 
                     {tecnico.tec_observacoes && (
                       <div className="mt-4 pt-4 border-t">
-                        <p className="text-sm text-muted-foreground"><strong>Observações:</strong> {tecnico.tec_observacoes}</p>
+                        <p className="text-sm text-muted-foreground">
+                          <strong>Observações:</strong> {tecnico.tec_observacoes}
+                        </p>
                       </div>
                     )}
                   </Card>
