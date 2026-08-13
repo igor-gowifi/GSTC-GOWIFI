@@ -26,8 +26,16 @@ const isSolicitacaoAtrasada = (status?: string, dataAtividadeStr?: string | null
   const normalizedStatus = status.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (normalizedStatus !== 'agendado') return false;
 
-  const dataAtividade = new Date(dataAtividadeStr);
-  dataAtividade.setHours(0, 0, 0, 0);
+  // Extrai apenas os números da data YYYY-MM-DD para evitar alteração de fuso horário (UTC)
+  const parts = dataAtividadeStr.split('T')[0].split('-');
+  if (parts.length < 3) return false;
+
+  const ano = parseInt(parts[0], 10);
+  const mes = parseInt(parts[1], 10) - 1; // Mês em JS vai de 0 a 11
+  const dia = parseInt(parts[2], 10);
+
+  // Cria a data no fuso local exato
+  const dataAtividade = new Date(ano, mes, dia, 0, 0, 0, 0);
 
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
