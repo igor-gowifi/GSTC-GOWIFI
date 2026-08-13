@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Menu, X, BarChart3, Users, List, Plus, Search, LogOut, Wifi, User, Terminal, Settings, Moon, Sun, Package } from 'lucide-react';
+import { Menu, X, BarChart3, Users, List, Plus, Search, LogOut, User, Terminal, Settings, Moon, Sun, Package } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 
 interface NavigationProps {
@@ -109,9 +109,12 @@ export default function Navigation({
       } fixed md:relative left-0 top-0 h-screen w-64 bg-sidebar border-r border-sidebar-border flex flex-col z-40 md:z-auto`}>
         
         {/* Logo */}
-        <div className="flex items-center gap-2 p-6 border-b border-sidebar-border">
-          <Wifi className="w-6 h-6 text-blue-600" />
-          <span className="font-bold text-lg">GoWiFi</span>
+        <div className="flex items-center justify-center p-3 border-b border-sidebar-border h-20 w-full">
+          <img 
+            src="/GOWifi_Final-02.png" 
+            alt="GoWiFi Logo" 
+            className="h-14 max-w-[85%] object-contain" 
+          />
         </div>
 
         {/* Navigation Items */}
@@ -167,8 +170,6 @@ export default function Navigation({
           </Button>
         </div>
       </div>
-
-
     </>
   );
 }

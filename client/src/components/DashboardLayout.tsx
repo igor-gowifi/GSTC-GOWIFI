@@ -119,10 +119,14 @@ function MobileDashboard({ user, children }: { user: any; children: React.ReactN
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
-            <div className="flex flex-col h-full">
-              <div className="h-16 border-b flex items-center px-4">
-                <span className="font-semibold">Navigation</span>
-              </div>
+            <div className="h-16 border-b flex items-center px-4 gap-2">
+              <img 
+                src="/logo.png" 
+                alt="GoWiFi Logo" 
+                className="h-7 w-auto object-contain" 
+              />
+              <span className="font-semibold">GoWiFi</span>
+            </div>
               <nav className="flex-1 overflow-auto p-2">
                 {menuItems.map(item => (
                   <button
@@ -247,10 +251,15 @@ function DesktopDashboard({
         className="flex flex-col border-r bg-background/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur relative"
         style={{ width: `${sidebarWidth}px` }}
       >
-        {/* Sidebar Header */}
-        <div className="h-16 border-b flex items-center px-4 justify-between">
-          <span className="font-semibold tracking-tight">GoWiFi</span>
-        </div>
+      {/* Sidebar Header */}
+     <div className="h-16 border-b flex items-center px-4 gap-2">
+      <img 
+        src="/logo.png" 
+        alt="GoWiFi Logo" 
+        className="h-8 w-auto object-contain" 
+      />
+      <span className="font-semibold tracking-tight">GoWiFi</span>
+    </div>
 
         {/* Sidebar Navigation */}
         <nav className="flex-1 overflow-auto p-2">
