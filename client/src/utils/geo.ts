@@ -1,8 +1,11 @@
+import { geocodeAddress as geocodeAddressSanitizado } from './geocodeAddress';
+
 export interface Coordenadas {
   lat: number;
   lon: number;
 }
 
+// Reutiliza a lógica limpa e com fallbacks hierárquicos do geocodeAddress.ts
 export async function geocodeAddress(endereco: {
   rua: string;
   numero: string;
@@ -10,30 +13,34 @@ export async function geocodeAddress(endereco: {
   cidade: string;
   uf: string;
 }): Promise<Coordenadas | null> {
-  try {
-    const enderecoFormatado = `${endereco.rua}, ${endereco.numero}, ${endereco.bairro}, ${endereco.cidade}, ${endereco.uf}, Brasil`;
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(enderecoFormatado)}&format=json`;
+  const result = await geocodeAddressSanitizado({
+    tec_cep: '', // Não precisa de CEP para o geocoding
+    tec_rua: endereco.rua,
+    tec_numero: endereco.numero,
+    tec_bairro: endereco.bairro,
+    tec_cidade: endereco.cidade,
+    tec_uf: endereco.uf,
+  });
 
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data && data.length > 0) {
-      return {
-        lat: parseFloat(data[0].lat),
-        lon: parseFloat(data[0].lon),
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error('Erro ao fazer geocoding:', error);
-    return null;
+  if (result) {
+    return {
+      lat: result.lat,
+      lon: result.lng, // Mapeia 'lng' para 'lon' mantendo a interface do geo.ts
+    };
   }
+
+  return null;
 }
 
+// Ajustado com trava nacional &countrycodes=br para buscas genéricas
 export async function searchNominatim(query: string): Promise<Coordenadas | null> {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json`;
-    const response = await fetch(url);
+    const queryComPais = query.toLowerCase().includes('brasil') ? query : `${query}, Brasil`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryComPais)}&format=json&countrycodes=br&limit=1`;
+    
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'GoWiFiApp/1.0' },
+    });
     const data = await response.json();
 
     if (data && data.length > 0) {
