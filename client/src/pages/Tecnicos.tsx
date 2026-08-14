@@ -111,14 +111,16 @@ export default function Tecnicos() {
     }));
   }, [tecnicos]);
 
-  // Filtrar técnicos por nome
   const filteredTecnicos = useMemo(() => {
-    return transformedTecnicos.filter(t =>
-      t.tecNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.tecTelefone.includes(searchTerm)
-    );
-  }, [transformedTecnicos, searchTerm]);
-
+  const term = searchTerm.toLowerCase();
+  
+  return transformedTecnicos.filter(t => {
+    const nome = (t.tecNome || '').toLowerCase();
+    const telefone = (t.tecTelefone || '').toLowerCase();
+    
+    return nome.includes(term) || telefone.includes(term);
+  });
+}, [transformedTecnicos, searchTerm]);
   const handleBuscarCEP = async (cep: string) => {
     if (cep.length !== 8) return;
     
