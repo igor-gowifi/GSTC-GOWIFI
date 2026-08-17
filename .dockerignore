@@ -5,3 +5,6 @@ npm
 dist
 pnpm-lock.yaml
 .pnpm-store
+npm-letsencrypt
+npm-data
+database
