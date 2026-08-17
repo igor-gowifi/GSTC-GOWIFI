@@ -12,13 +12,15 @@ const STATUS_DISPLAY: Record<string, string> = {
   'Pendente': 'Pendente',
   'Agendado': 'Agendado',
   'Concluído': 'Concluído',
-  'Improdutivo': 'Improdutivo'
+  'Improdutivo': 'Improdutivo',
+  'Cancelado': 'Cancelado'
 };
 const STATUS_VALUES: Record<string, string> = {
   'Pendente': 'pendente',
   'Agendado': 'agendado',
   'Concluído': 'concluído',
-  'Improdutivo': 'improdutivo'
+  'Improdutivo': 'improdutivo',
+  'Cancelado': 'Cancelado'
 };
 const GRUPOS_PROJETO = [
   'WiFi Seguro',
@@ -36,12 +38,14 @@ const GRUPOS_PROJETO = [
 ];
 const EMPRESAS_PARCEIRAS = [
   'infrafrele',
+  'Cobe',
   'luciano-team',
   'findup',
   'gowifi'
 ];
 const EMPRESAS_DISPLAY: Record<string, string> = {
   'infrafrele': 'Infrafrele',
+  'Cabe':'Cobe',
   'luciano-team': 'Luciano-team',
   'findup': 'Findup',
   'gowifi': 'Gowifi'
@@ -77,7 +81,9 @@ interface UnifiedFilterPanelProps {
     searchTerm?: string;
     status?: string;
     projeto?: string;
-    servico?: string; // <-- Adicionado
+    servico?: string;
+    cidade?: string;
+    uf?: string;
     empresaParceira?: string;
     semana?: string;
     mes?: string;
@@ -112,10 +118,32 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
     return Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_servico).filter(Boolean)));
   }, [allSolicitacoes]);
 
+  const ufs = useMemo(() => {
+    return Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_uf).filter(Boolean))).sort();
+  }, [allSolicitacoes]);
+
+  // Exibe apenas as cidades vinculadas ao UF selecionado (se houver UF ativo)
+  const cidades = useMemo(() => {
+    const solicitacoesFiltradas = filters.uf
+      ? allSolicitacoes.filter((s: any) => s.solic_uf === filters.uf)
+      : allSolicitacoes;
+
+    return Array.from(new Set(solicitacoesFiltradas.map((s: any) => s.solic_cidade).filter(Boolean))).sort();
+  }, [allSolicitacoes, filters.uf]);
+
   const empresas = useMemo(() => {
     const unique = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_empresa_parceira).filter(Boolean)));
     return unique.length > 0 ? unique : EMPRESAS_PARCEIRAS;
   }, [allSolicitacoes]);
+
+  const handleUfChange = (selectedUf: string) => {
+    const newUf = selectedUf === 'all' ? '' : selectedUf;
+    onFilterChange({
+      ...filters,
+      uf: newUf,
+      cidade: '', // Reseta o município para evitar incoerência
+    });
+  };
 
   const handleClearFilters = () => {
     onFilterChange({
@@ -123,6 +151,8 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
       status: '',
       projeto: '',
       servico: '',
+      cidade: '',
+      uf: '',
       empresaParceira: '',
       semana: '',
       mes: '',
@@ -207,6 +237,38 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
                   <SelectItem value="all">Todos</SelectItem>
                   {servicos.map(servico => (
                     <SelectItem key={servico} value={servico}>{servico}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* UF */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">UF</label>
+              <Select value={filters.uf || 'all'} onValueChange={handleUfChange}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecionar UF" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {ufs.map(uf => (
+                    <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Município / Cidade */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Município</label>
+              <Select value={filters.cidade || 'all'} onValueChange={(value) => onFilterChange({ ...filters, cidade: value === 'all' ? '' : value })}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecionar município" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {cidades.map(cidade => (
+                    <SelectItem key={cidade} value={cidade}>{cidade}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

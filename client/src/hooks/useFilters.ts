@@ -5,6 +5,8 @@ export interface FilterState {
   status: string;
   projeto: string;
   servico: string;
+  cidade: string; // <-- Adicionado
+  uf: string;     // <-- Adicionado
   dia: 'hoje' | 'ontem' | 'amanha' | '';
   semana: 'esta-semana' | 'semana-passada' | '';
   mes: string;
@@ -28,6 +30,8 @@ const initialFilterState: FilterState = {
   status: '',
   projeto: '',
   servico: '',
+  cidade: '', // <-- Adicionado
+  uf: '',     // <-- Adicionado
   dia: '',
   semana: '',
   mes: '',
@@ -97,6 +101,8 @@ export function useFilters() {
     if (filters.status) active.push('Status');
     if (filters.projeto) active.push('Projeto');
     if (filters.servico) active.push('Serviço');
+    if (filters.cidade) active.push('Município'); // <-- Exibição no badge/ativo
+    if (filters.uf) active.push('UF');           // <-- Exibição no badge/ativo
     if (filters.dia) active.push('Dia');
     if (filters.semana) active.push('Semana');
     if (filters.mes) active.push('Mês');

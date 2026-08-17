@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Download, Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useFilters } from '@/hooks/useFilters';
 import { UnifiedFilterPanel } from '@/components/UnifiedFilterPanel';
@@ -48,7 +48,7 @@ export default function Solicitacoes() {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<SortOption>('data-criacao-desc');
   const [, navigate] = useLocation();
-  const { filters, updateFilter, clearFilters, getActiveFilterCount, getActiveFilters } = useFilters();
+  const { filters, updateFilter, getActiveFilterCount, getActiveFilters } = useFilters();
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(filters.searchTerm || '');
 
   // Debounce search term
@@ -59,13 +59,15 @@ export default function Solicitacoes() {
     return () => clearTimeout(timer);
   }, [filters.searchTerm]);
 
-  // Fetch filtered solicitacoes (without searchTerm - we'll filter client-side with Fuse)
+  // Fetch filtered solicitacoes (including cidade and uf)
   const { data: filteredSolicitacoes = [], isLoading } = trpc.solicitacoes.filter.useQuery(
     {
       searchTerm: '', // Empty search - we'll use Fuse.js on client
       status: filters.status || '',
       projeto: filters.projeto || '',
       servico: filters.servico || '',
+      cidade: filters.cidade || '', // <-- Adicionado
+      uf: filters.uf || '',         // <-- Adicionado
       dia: filters.dia as any,
       semana: filters.semana as any,
       sortBy: sortBy || '',
@@ -80,15 +82,6 @@ export default function Solicitacoes() {
       dataConclusaoEnd: filters.dataConclusaoEnd || '',
     }
   );
-
-  // Get all solicitacoes for extracting unique values
-  const { data: allSolicitacoes = [] } = trpc.solicitacoes.list.useQuery();
-
-  // Extract unique projects and statuses
-  const projetos = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_projeto).filter(Boolean)));
-  const statuses = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_status).filter(Boolean)));
-  const empresas = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_empresa_parceira).filter(Boolean)));
-  const servicos = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_servico).filter(Boolean)));
 
   // Fuse.js fuzzy search
   const fuseSearchResults = useMemo(() => {
