@@ -15,6 +15,7 @@ import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { aplicarMascaraCEP } from '@/utils/masks';
 import { useState, useMemo, useEffect } from 'react';
+import { useNearbyTechnicians } from '@/hooks/useNearbyTechnicians';
 
 const GRUPOS_PROJETO = [
   'WiFi Seguro',
@@ -46,17 +47,6 @@ const OPERADORAS = [
   'Outro',
 ];
 
-const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371; // Raio da Terra em km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c * 10) / 10;
-};
-
 export default function DetalheSolicitacao() {
   const { user } = useAuth();
   const pathId = typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : null;
@@ -65,48 +55,15 @@ export default function DetalheSolicitacao() {
   const [showTecnicoModal, setShowTecnicoModal] = useState(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [formData, setFormData] = useState<any>({});
-  const [modalCoords, setModalCoords] = useState({ latitude: 0, longitude: 0 });
   
+  // Instância do Hook Customizado de Busca de Técnicos
+  const { nearbyTecnicos, isSearching: isLoadingTecnicos, searchTechnicians } = useNearbyTechnicians();
+
   const { data: solicitacoesData = [] } = trpc.solicitacoes.list.useQuery();
   const { data: tecnicos = [] } = trpc.tecnicos.list.useQuery();
   const sendToFreshdesk = trpc.solicitacoes.sendToFreshdesk.useMutation();
   const deleteMutation = trpc.solicitacoes.delete.useMutation();
   const updateMutation = trpc.solicitacoes.update.useMutation();
-  
-  const { data: rawNearbyTecnicos = [], isLoading: isLoadingTecnicos } = 
-  trpc.solicitacoes.findNearestTecnicos.useQuery(
-    {
-      latitude: Number(modalCoords.latitude),
-      longitude: Number(modalCoords.longitude),
-      limit: 10,
-      sortBy: 'distance',
-    },
-    { 
-      enabled: showTecnicoModal && Number(modalCoords.latitude) !== 0 && Number(modalCoords.longitude) !== 0 
-    }
-  );
-
-  const nearbyTecnicos = useMemo(() => {
-    if (!rawNearbyTecnicos || rawNearbyTecnicos.length === 0) return [];
-    if (!modalCoords.latitude || !modalCoords.longitude) return rawNearbyTecnicos;
-
-    return rawNearbyTecnicos
-      .map((tecnico: any) => {
-        const tecLat = Number(tecnico.tec_latitude || tecnico.latitude || 0);
-        const tecLon = Number(tecnico.tec_longitude || tecnico.longitude || 0);
-
-        const dist = (tecLat && tecLon)
-          ? calcularDistancia(modalCoords.latitude, modalCoords.longitude, tecLat, tecLon)
-          : null;
-
-        return {
-          ...tecnico,
-          distancia: dist,
-        };
-      })
-      .filter((t: any) => t.distancia !== null)
-      .sort((a: any, b: any) => (a.distancia || 0) - (b.distancia || 0));
-  }, [rawNearbyTecnicos, modalCoords]);
 
   const solicitacao = useMemo(() => {
     if (!pathId) return null;
@@ -269,39 +226,34 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
   };
 
   const handleOpenTecnicoModal = async () => {
-  let lat = Number(formData.solic_latitude || formData.latitude || 0);
-  let lon = Number(formData.solic_longitude || formData.longitude || 0);
+    let lat = Number(formData.solic_latitude || formData.latitude || 0);
+    let lon = Number(formData.solic_longitude || formData.longitude || 0);
 
-  // Se houver um CEP preenchido, tenta buscar a coordenada exata dele primeiro
-  if (formData.solic_cep) {
-    try {
-      const cepLimpo = String(formData.solic_cep).replace(/\D/g, '');
-      if (cepLimpo.length === 8) {
-        const endereco = await buscarEnderecoPorCEP(cepLimpo);
-        if (endereco?.latitude && endereco?.longitude) {
-          lat = Number(endereco.latitude);
-          lon = Number(endereco.longitude);
+    // Tenta buscar a coordenada via CEP primeiro se disponível
+    if (formData.solic_cep) {
+      try {
+        const cepLimpo = String(formData.solic_cep).replace(/\D/g, '');
+        if (cepLimpo.length === 8) {
+          const endereco = await buscarEnderecoPorCEP(cepLimpo);
+          if (endereco?.latitude && endereco?.longitude) {
+            lat = Number(endereco.latitude);
+            lon = Number(endereco.longitude);
+          }
         }
+      } catch (error) {
+        console.error('Erro ao buscar coordenadas via CEP:', error);
       }
-    } catch (error) {
-      console.error('Erro ao buscar coordenadas via CEP:', error);
     }
-  }
 
-  // Fallback para as coordenadas salvas na solicitação se o CEP falhar
-  if (!lat || !lon) {
-    lat = Number(formData.solic_latitude || formData.latitude || 0);
-    lon = Number(formData.solic_longitude || formData.longitude || 0);
-  }
+    if (!lat || !lon) {
+      toast.error('Solicitação não possui coordenadas válidas para calcular a distância.');
+      return;
+    }
 
-  if (!lat || !lon) {
-    toast.error('Solicitação não possui coordenadas válidas para calcular a distância.');
-    return;
-  }
-
-  setModalCoords({ latitude: lat, longitude: lon });
-  setShowTecnicoModal(true);
-};
+    // Dispara a busca via hook isolado
+    searchTechnicians(tecnicos, { lat, lng: lon });
+    setShowTecnicoModal(true);
+  };
 
   const handleDelete = async () => {
     if (!confirm('Tem certeza que deseja deletar esta solicitação?')) return;
@@ -341,31 +293,30 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
   };
   
   const handleBuscarCEP = async (cepLimpo: string) => {
-  if (cepLimpo.length !== 8) return;
-  
-  try {
-    const endereco = await buscarEnderecoPorCEP(cepLimpo);
-    if (endereco) {
-      const enderecoConvertido = converterEnderecoViaCEP(endereco);
-      setFormData((prev: any) => ({
-        ...prev,
-        solic_rua: enderecoConvertido.rua,
-        solic_bairro: enderecoConvertido.bairro,
-        solic_cidade: enderecoConvertido.cidade,
-        solic_uf: enderecoConvertido.uf,
-        // Armazena as coordenadas do novo CEP
-        solic_latitude: endereco.latitude || prev.solic_latitude,
-        solic_longitude: endereco.longitude || prev.solic_longitude,
-      }));
-      toast.success('Endereço e coordenadas encontrados!');
-    } else {
-      toast.error('CEP não encontrado');
+    if (cepLimpo.length !== 8) return;
+    
+    try {
+      const endereco = await buscarEnderecoPorCEP(cepLimpo);
+      if (endereco) {
+        const enderecoConvertido = converterEnderecoViaCEP(endereco);
+        setFormData((prev: any) => ({
+          ...prev,
+          solic_rua: enderecoConvertido.rua,
+          solic_bairro: enderecoConvertido.bairro,
+          solic_cidade: enderecoConvertido.cidade,
+          solic_uf: enderecoConvertido.uf,
+          solic_latitude: endereco.latitude || prev.solic_latitude,
+          solic_longitude: endereco.longitude || prev.solic_longitude,
+        }));
+        toast.success('Endereço e coordenadas encontrados!');
+      } else {
+        toast.error('CEP não encontrado');
+      }
+    } catch (error) {
+      console.error('Erro ao buscar CEP:', error);
+      toast.error('Erro ao buscar CEP');
     }
-  } catch (error) {
-    console.error('Erro ao buscar CEP:', error);
-    toast.error('Erro ao buscar CEP');
-  }
-};
+  };
 
   const statusOptions = ['Pendente', 'Agendado', 'Concluído', 'Improdutivo'];
   const faturamentoOptions = ['Pago', 'Não Pago'];
@@ -435,7 +386,6 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
             </Button>
           </div>
         </div>
-
         {/* Main Content - Two Columns */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left Column - Solicitação Info */}
@@ -1016,6 +966,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
         onClose={() => setShowTecnicoModal(false)}
         onSelectTechnician={handleSelectTecnico}
         technicians={nearbyTecnicos}
+        allTechnicians={tecnicos} // <-- Adicionado para busca global por nome
         isLoading={isLoadingTecnicos}
         currentTechnicianId={formData.solic_tecnico_id}
       />

@@ -3,8 +3,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Star, Phone, Building2, CheckCircle2 } from 'lucide-react';
+import { MapPin, Star, Phone, Building2, CheckCircle2, Search } from 'lucide-react';
 
 interface Technician {
   id: string;
@@ -17,6 +18,7 @@ interface Technician {
   tec_bairro: string;
   tec_cidade: string;
   tec_uf: string;
+  distanciaKm?: number;
   distancia?: number;
   latitude?: number;
   longitude?: number;
@@ -26,8 +28,9 @@ interface TechnicianSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectTechnician: (technician: Technician) => void;
-  technicians: Technician[];
-  isLoading: boolean;
+  technicians?: Technician[];      // Lista de técnicos próximos
+  allTechnicians?: Technician[];   // Lista completa sem filtro geográfico
+  isLoading?: boolean;
   currentTechnicianId?: string;
 }
 
@@ -35,27 +38,49 @@ export function TechnicianSearchModal({
   isOpen,
   onClose,
   onSelectTechnician,
-  technicians,
-  isLoading,
+  technicians = [],
+  allTechnicians = [],
+  isLoading = false,
   currentTechnicianId,
 }: TechnicianSearchModalProps) {
   const [sortBy, setSortBy] = useState<'distance' | 'rating'>('distance');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const sortedTechnicians = useMemo(() => {
-    const sorted = [...technicians];
+    // Se digitou algo na busca, pesquisa na base completa (allTechnicians)
+    const query = searchTerm.trim().toLowerCase();
     
+    if (query !== '') {
+      const sourceList = allTechnicians.length > 0 ? allTechnicians : technicians;
+      return sourceList.filter(
+        (tec) =>
+          tec.tec_nome?.toLowerCase().includes(query) ||
+          tec.tec_telefone?.toLowerCase().includes(query) ||
+          tec.tec_empresa_parceira?.toLowerCase().includes(query) ||
+          tec.tec_cidade?.toLowerCase().includes(query) ||
+          tec.tec_uf?.toLowerCase().includes(query)
+      );
+    }
+
+    // Se a busca estiver vazia, utiliza a lista por proximidade e aplica a ordenação selecionada
+    const listToOrder = [...technicians];
+
     if (sortBy === 'rating') {
-      sorted.sort((a, b) => {
+      listToOrder.sort((a, b) => {
         const ratingA = parseFloat(String(a.tec_avaliacao)) || 0;
         const ratingB = parseFloat(String(b.tec_avaliacao)) || 0;
         return ratingB - ratingA;
       });
     } else {
-      sorted.sort((a, b) => (a.distancia || 0) - (b.distancia || 0));
+      listToOrder.sort((a, b) => {
+        const distA = a.distanciaKm ?? a.distancia ?? Infinity;
+        const distB = b.distanciaKm ?? b.distancia ?? Infinity;
+        return distA - distB;
+      });
     }
-    
-    return sorted;
-  }, [technicians, sortBy]);
+
+    return listToOrder;
+  }, [technicians, allTechnicians, sortBy, searchTerm]);
 
   const handleSelectTechnician = (technician: Technician) => {
     onSelectTechnician(technician);
@@ -64,14 +89,25 @@ export function TechnicianSearchModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>Selecionar Técnico</DialogTitle>
           <DialogDescription>Escolha um técnico para atribuir à solicitação</DialogDescription>
         </DialogHeader>
 
-        {/* Tabs for sorting */}
-        <Tabs value={sortBy} onValueChange={(value) => setSortBy(value as 'distance' | 'rating')}>
+        {/* Input de Busca */}
+        <div className="relative my-2">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por nome, telefone, cidade ou empresa..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+
+        {/* Tabs e Lista */}
+        <Tabs value={sortBy} onValueChange={(value) => setSortBy(value as 'distance' | 'rating')} className="flex-1 flex flex-col overflow-hidden">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="distance">
               <MapPin className="w-4 h-4 mr-2" />
@@ -83,7 +119,7 @@ export function TechnicianSearchModal({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="distance" className="space-y-3 mt-4">
+          <div className="flex-1 overflow-y-auto mt-4 pr-1">
             {isLoading ? (
               <div className="text-center py-8">Carregando técnicos...</div>
             ) : sortedTechnicians.length === 0 ? (
@@ -91,37 +127,19 @@ export function TechnicianSearchModal({
                 Nenhum técnico encontrado
               </div>
             ) : (
-              sortedTechnicians.map((technician) => (
-                <TechnicianCard
-                  key={technician.id}
-                  technician={technician}
-                  isSelected={currentTechnicianId === technician.id}
-                  onSelect={() => handleSelectTechnician(technician)}
-                  sortBy="distance"
-                />
-              ))
-            )}
-          </TabsContent>
-
-          <TabsContent value="rating" className="space-y-3 mt-4">
-            {isLoading ? (
-              <div className="text-center py-8">Carregando técnicos...</div>
-            ) : sortedTechnicians.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Nenhum técnico encontrado
+              <div className="space-y-3">
+                {sortedTechnicians.map((technician) => (
+                  <TechnicianCard
+                    key={technician.id}
+                    technician={technician}
+                    isSelected={currentTechnicianId === technician.id}
+                    onSelect={() => handleSelectTechnician(technician)}
+                    sortBy={sortBy}
+                  />
+                ))}
               </div>
-            ) : (
-              sortedTechnicians.map((technician) => (
-                <TechnicianCard
-                  key={technician.id}
-                  technician={technician}
-                  isSelected={currentTechnicianId === technician.id}
-                  onSelect={() => handleSelectTechnician(technician)}
-                  sortBy="rating"
-                />
-              ))
             )}
-          </TabsContent>
+          </div>
         </Tabs>
       </DialogContent>
     </Dialog>
@@ -135,9 +153,9 @@ interface TechnicianCardProps {
   sortBy: 'distance' | 'rating';
 }
 
-function TechnicianCard({ technician, isSelected, onSelect, sortBy }: TechnicianCardProps) {
+function TechnicianCard({ technician, isSelected, onSelect }: TechnicianCardProps) {
   const rating = parseFloat(String(technician.tec_avaliacao)) || 0;
-  const distance = technician.distancia || 0;
+  const distance = technician.distanciaKm ?? technician.distancia;
 
   return (
     <Card
@@ -179,7 +197,7 @@ function TechnicianCard({ technician, isSelected, onSelect, sortBy }: Technician
           </div>
 
           <Badge variant="secondary">
-            {distance.toFixed(1)} km
+            {distance !== undefined && distance !== Infinity ? `${distance.toFixed(1)} km` : 'N/A'}
           </Badge>
 
           <Button

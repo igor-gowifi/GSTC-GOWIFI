@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Download, Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useFilters } from '@/hooks/useFilters';
 import { UnifiedFilterPanel } from '@/components/UnifiedFilterPanel';
@@ -15,16 +15,40 @@ import { formatDatePtBr, formatTimePtBr } from '@/lib/dateFormatter';
 import { useAuth } from '@/_core/hooks/useAuth';
 import Fuse from 'fuse.js';
 
-const ITEMS_PER_PAGE = 25;
+const ITEMS_PER_PAGE = 50;
 
 type SortOption = 'data-criacao-desc' | 'data-criacao-asc' | 'data-atividade-desc' | 'data-atividade-asc' | 'data-conclusao-desc' | 'data-conclusao-asc' | 'status-asc' | 'status-desc';
+
+// Função utilitária para checar se a solicitação está agendada e em atraso (dia anterior a hoje)
+const isSolicitacaoAtrasada = (status?: string, dataAtividadeStr?: string | null): boolean => {
+  if (!status || !dataAtividadeStr) return false;
+  
+  const normalizedStatus = status.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (normalizedStatus !== 'agendado') return false;
+
+  // Extrai apenas os números da data YYYY-MM-DD para evitar alteração de fuso horário (UTC)
+  const parts = dataAtividadeStr.split('T')[0].split('-');
+  if (parts.length < 3) return false;
+
+  const ano = parseInt(parts[0], 10);
+  const mes = parseInt(parts[1], 10) - 1; // Mês em JS vai de 0 a 11
+  const dia = parseInt(parts[2], 10);
+
+  // Cria a data no fuso local exato
+  const dataAtividade = new Date(ano, mes, dia, 0, 0, 0, 0);
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  return dataAtividade < hoje;
+};
 
 export default function Solicitacoes() {
   const { user } = useAuth();
   const [currentPage, setCurrentPage] = useState(1);
   const [sortBy, setSortBy] = useState<SortOption>('data-criacao-desc');
   const [, navigate] = useLocation();
-  const { filters, updateFilter, clearFilters, getActiveFilterCount, getActiveFilters } = useFilters();
+  const { filters, updateFilter, getActiveFilterCount, getActiveFilters } = useFilters();
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(filters.searchTerm || '');
 
   // Debounce search term
@@ -35,12 +59,15 @@ export default function Solicitacoes() {
     return () => clearTimeout(timer);
   }, [filters.searchTerm]);
 
-  // Fetch filtered solicitacoes (without searchTerm - we'll filter client-side with Fuse)
+  // Fetch filtered solicitacoes (including cidade and uf)
   const { data: filteredSolicitacoes = [], isLoading } = trpc.solicitacoes.filter.useQuery(
     {
       searchTerm: '', // Empty search - we'll use Fuse.js on client
       status: filters.status || '',
       projeto: filters.projeto || '',
+      servico: filters.servico || '',
+      cidade: filters.cidade || '', // <-- Adicionado
+      uf: filters.uf || '',         // <-- Adicionado
       dia: filters.dia as any,
       semana: filters.semana as any,
       sortBy: sortBy || '',
@@ -56,14 +83,6 @@ export default function Solicitacoes() {
     }
   );
 
-  // Get all solicitacoes for extracting unique values
-  const { data: allSolicitacoes = [] } = trpc.solicitacoes.list.useQuery();
-
-  // Extract unique projects and statuses
-  const projetos = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_projeto).filter(Boolean)));
-  const statuses = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_status).filter(Boolean)));
-  const empresas = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_empresa_parceira).filter(Boolean)));
-
   // Fuse.js fuzzy search
   const fuseSearchResults = useMemo(() => {
     if (!debouncedSearchTerm || debouncedSearchTerm.length < 1) {
@@ -78,7 +97,7 @@ export default function Solicitacoes() {
         { name: 'solic_freshdesk', weight: 0.2 },
         { name: 'solic_contato_local', weight: 0.1 },
       ],
-      threshold: 0.3, // Tolera erros de digitação
+      threshold: 0.3,
       minMatchCharLength: 2,
     });
 
@@ -165,39 +184,13 @@ export default function Solicitacoes() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Solicitações');
       
-      // Ajustar largura das colunas
       ws['!cols'] = [
-        { wch: 4 },   // #
-        { wch: 10 },  // ID
-        { wch: 25 },  // Nome da Atividade
-        { wch: 15 },  // Projeto
-        { wch: 15 },  // Serviço
-        { wch: 15 },  // Operadora
-        { wch: 15 },  // Ticket Freshdesk
-        { wch: 15 },  // Contato Local
-        { wch: 20 },  // Rua
-        { wch: 10 },  // Número
-        { wch: 15 },  // Complemento
-        { wch: 15 },  // Bairro
-        { wch: 15 },  // Cidade
-        { wch: 5 },   // UF
-        { wch: 12 },  // CEP
-        { wch: 12 },  // Latitude
-        { wch: 12 },  // Longitude
-        { wch: 15 },  // Data de Criação
-        { wch: 15 },  // Data da Atividade
-        { wch: 15 },  // Hora da Atividade
-        { wch: 15 },  // Data de Conclusão
-        { wch: 15 },  // Horário de Chegada
-        { wch: 15 },  // Horário de Liberação
-        { wch: 15 },  // Horário de Término
-        { wch: 15 },  // Status
-        { wch: 12 },  // Faturamento
-        { wch: 20 },  // Técnico
-        { wch: 15 },  // CPF do Técnico
-        { wch: 15 },  // Telefone do Técnico
-        { wch: 20 },  // Empresa do Técnico
-        { wch: 30 },  // Observações
+        { wch: 4 }, { wch: 10 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+        { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 15 }, { wch: 15 },
+        { wch: 15 }, { wch: 5 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 15 },
+        { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+        { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 20 },
+        { wch: 30 }
       ];
       
       const now = new Date();
@@ -211,7 +204,6 @@ export default function Solicitacoes() {
   };
 
   const getStatusColor = (status: string) => {
-    // Normalize: remove accents and convert to lowercase
     const normalizedStatus = (status || '')
       .toLowerCase()
       .trim()
@@ -244,7 +236,7 @@ export default function Solicitacoes() {
           <p className="text-sm md:text-base text-muted-foreground">Gerencie todas as solicitações técnicas do sistema</p>
         </div>
 
-        {/* Filters on Mobile (Above Content) */}
+        {/* Filters on Mobile */}
         <div className="lg:hidden mb-6">
           <UnifiedFilterPanel
             filters={filters}
@@ -259,7 +251,7 @@ export default function Solicitacoes() {
           />
         </div>
 
-        {/* Main Layout: Content on Left, Filters on Right (Desktop) */}
+        {/* Main Layout */}
         <div className="flex gap-6 items-start">
           {/* Left Content Area */}
           <div className="flex-1 min-w-0 space-y-4">
@@ -335,98 +327,119 @@ export default function Solicitacoes() {
               </div>
             )}
 
-            {/* Cards List - Horizontal Layout */}
+            {/* Cards List */}
             {!isLoading && paginatedSolicitacoes.length > 0 && (
               <div className="space-y-3">
-                {paginatedSolicitacoes.map((sol: any) => (
-                  <Card key={sol.id} className="p-4 hover:shadow-lg transition-shadow">
-                    <div className="flex flex-col gap-4">
-                      {/* Header Row */}
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-sm md:text-base">{sol.solic_nome || 'Sem nome'}</h3>
-                          <p className="text-xs text-muted-foreground">ID: {sol.id}</p>
-                        </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(sol.solic_status)}`}>
-                          {sol.solic_status || 'N/A'}
-                        </span>
-                      </div>
+                {paginatedSolicitacoes.map((sol: any) => {
+                  const atrasado = isSolicitacaoAtrasada(sol.solic_status, sol.solic_data_atividade);
 
-                      {/* Details Grid */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                        <div>
-                          <p className="text-muted-foreground">Projeto</p>
-                          <p className="font-medium">{sol.solic_projeto || '-'}</p>
+                  return (
+                    <Card 
+                      key={sol.id} 
+                      className={`p-4 transition-all hover:shadow-lg ${
+                        atrasado 
+                          ? 'border-l-4 border-l-red-600 border-red-500/30 bg-red-950/10' 
+                          : ''
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4">
+                        {/* Header Row */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-sm md:text-base">{sol.solic_nome || 'Sem nome'}</h3>
+                            <p className="text-xs text-muted-foreground">ID: {sol.id}</p>
+                          </div>
+
+                          {/* Badge do Status / Atrasado */}
+                          {atrasado ? (
+                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-red-600 text-white shadow-sm">
+                              Agendado (Atrasado)
+                            </span>
+                          ) : (
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(sol.solic_status)}`}>
+                              {sol.solic_status || 'N/A'}
+                            </span>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-muted-foreground">Serviço</p>
-                          <p className="font-medium">{sol.solic_servico || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Operadora</p>
-                          <p className="font-medium">{sol.solic_operadora || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Ticket</p>
-                          <p className="font-medium">{sol.solic_freshdesk || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Contato</p>
-                          <p className="font-medium">{sol.solic_contato_local || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Data Criação</p>
-                          <p className="font-medium">{formatDatePtBr(sol.solic_data_criacao)}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Data Atividade</p>
-                          <p className="font-medium">{formatDatePtBr(sol.solic_data_atividade)}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground">Data Conclusão</p>
-                          <p className="font-medium">{formatDatePtBr(sol.solic_data_conclusao)}</p>
-                        </div>
-                        {user?.role !== 'analista' && (
+
+                        {/* Details Grid */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                           <div>
-                            <p className="text-muted-foreground">Faturamento</p>
-                            <p className="font-medium">{sol.solic_faturamento || '-'}</p>
+                            <p className="text-muted-foreground">Projeto</p>
+                            <p className="font-medium">{sol.solic_projeto || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Serviço</p>
+                            <p className="font-medium">{sol.solic_servico || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Operadora</p>
+                            <p className="font-medium">{sol.solic_operadora || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Ticket</p>
+                            <p className="font-medium">{sol.solic_freshdesk || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Contato</p>
+                            <p className="font-medium">{sol.solic_contato_local || '-'}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Data Criação</p>
+                            <p className="font-medium">{formatDatePtBr(sol.solic_data_criacao)}</p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Data Atividade</p>
+                            <p className={`font-medium ${atrasado ? 'text-red-500 font-bold' : ''}`}>
+                              {formatDatePtBr(sol.solic_data_atividade)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Data Conclusão</p>
+                            <p className="font-medium">{formatDatePtBr(sol.solic_data_conclusao)}</p>
+                          </div>
+                          {user?.role !== 'analista' && (
+                            <div>
+                              <p className="text-muted-foreground">Faturamento</p>
+                              <p className="font-medium">{sol.solic_faturamento || '-'}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Technician Info */}
+                        {sol.tecnico && (
+                          <div className="border-t border-border pt-3 grid grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Técnico</p>
+                              <p className="font-medium">{sol.tecnico.tec_nome || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Telefone</p>
+                              <p className="font-medium">{sol.tecnico.tec_telefone || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">CPF</p>
+                              <p className="font-medium">{sol.tecnico.tec_cpf || '-'}</p>
+                            </div>
                           </div>
                         )}
-                      </div>
 
-                      {/* Technician Info */}
-                      {sol.tecnico && (
-                        <div className="border-t border-border pt-3 grid grid-cols-3 gap-3 text-xs">
-                          <div>
-                            <p className="text-muted-foreground">Técnico</p>
-                            <p className="font-medium">{sol.tecnico.tec_nome || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Telefone</p>
-                            <p className="font-medium">{sol.tecnico.tec_telefone || '-'}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">CPF</p>
-                            <p className="font-medium">{sol.tecnico.tec_cpf || '-'}</p>
-                          </div>
+                        {/* Action Button */}
+                        <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewDetails(sol)}
+                            className="flex items-center gap-2"
+                          >
+                            <Eye className="w-4 h-4" />
+                            Ver Detalhes
+                          </Button>
                         </div>
-                      )}
-
-                      {/* Action Button */}
-                      <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewDetails(sol)}
-                          className="flex items-center gap-2"
-                        >
-                          <Eye className="w-4 h-4" />
-                          Ver Detalhes
-                        </Button>
                       </div>
-                    </div>
-                  </Card>
-                ))}
+                    </Card>
+                  );
+                })}
               </div>
             )}
 
@@ -463,7 +476,7 @@ export default function Solicitacoes() {
             )}
           </div>
 
-          {/* Right Sidebar: Unified Filter Panel (Fixed on Desktop) */}
+          {/* Right Sidebar: Unified Filter Panel */}
           <div className="hidden lg:block w-80 sticky top-6 h-fit">
             <UnifiedFilterPanel
               filters={filters}

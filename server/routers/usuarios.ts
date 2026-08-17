@@ -34,6 +34,7 @@ export const usuariosRouter = router({
         login_method: 'email',
         created_at: user.created_at,
         updated_at: user.updated_at,
+        last_sign_in_at: user.last_sign_in_at || null,
       }));
     } catch (error) {
       console.error('Erro ao listar usuarios:', error);
@@ -110,6 +111,7 @@ export const usuariosRouter = router({
           login_method: 'email',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          last_sign_in_at: null,
         }];
 
         await logAuditEvent({
@@ -208,6 +210,7 @@ export const usuariosRouter = router({
           login_method: 'email',
           created_at: targetUser.created_at,
           updated_at: new Date().toISOString(),
+          last_sign_in_at: targetUser.last_sign_in_at || null,
         }];
 
         await logAuditEvent({

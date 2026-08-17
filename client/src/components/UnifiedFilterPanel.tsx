@@ -2,9 +2,7 @@
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import DateRangePicker from './DateRangePicker';
 import { X } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { trpc } from '@/lib/trpc';
@@ -14,21 +12,25 @@ const STATUS_DISPLAY: Record<string, string> = {
   'Pendente': 'Pendente',
   'Agendado': 'Agendado',
   'Concluído': 'Concluído',
-  'Improdutivo': 'Improdutivo'
+  'Improdutivo': 'Improdutivo',
+  'Cancelado': 'Cancelado'
 };
 const STATUS_VALUES: Record<string, string> = {
   'Pendente': 'pendente',
   'Agendado': 'agendado',
   'Concluído': 'concluído',
-  'Improdutivo': 'improdutivo'
+  'Improdutivo': 'improdutivo',
+  'Cancelado': 'Cancelado'
 };
 const GRUPOS_PROJETO = [
   'WiFi Seguro',
   'Projetos Especiais',
   'Bradesco',
+  'Bradesco - Fase2',
+  'Bradesco - Migração',
   'Santander',
-  'PUC-Universidade',
-  'Hotelarias',
+  'PUC-SP',
+  'Hotelaria',
   'Telemedicina',
   'Escola Santa Maria',
   'Viasat',
@@ -36,12 +38,14 @@ const GRUPOS_PROJETO = [
 ];
 const EMPRESAS_PARCEIRAS = [
   'infrafrele',
+  'Cobe',
   'luciano-team',
   'findup',
   'gowifi'
 ];
 const EMPRESAS_DISPLAY: Record<string, string> = {
   'infrafrele': 'Infrafrele',
+  'Cabe':'Cobe',
   'luciano-team': 'Luciano-team',
   'findup': 'Findup',
   'gowifi': 'Gowifi'
@@ -61,13 +65,6 @@ const MESES = [
   { value: '12', label: 'Dezembro' },
 ];
 const ANOS = Array.from({ length: 10 }, (_, i) => (2026 + i).toString());
-// Semantic color tokens for better theming
-const CONTEXT_BOX_STYLES = {
-  light: 'bg-blue-50 border-blue-200',
-  dark: 'dark:bg-blue-950 dark:border-blue-800',
-  textLabel: 'text-blue-600 dark:text-blue-300',
-  textValue: 'text-blue-700 dark:text-blue-200',
-};
 
 const SEMANAS = [
   { value: 'esta-semana', label: 'Esta semana' },
@@ -84,6 +81,9 @@ interface UnifiedFilterPanelProps {
     searchTerm?: string;
     status?: string;
     projeto?: string;
+    servico?: string;
+    cidade?: string;
+    uf?: string;
     empresaParceira?: string;
     semana?: string;
     mes?: string;
@@ -114,16 +114,45 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
     return unique.length > 0 ? unique : GRUPOS_PROJETO;
   }, [allSolicitacoes]);
 
+  const servicos = useMemo(() => {
+    return Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_servico).filter(Boolean)));
+  }, [allSolicitacoes]);
+
+  const ufs = useMemo(() => {
+    return Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_uf).filter(Boolean))).sort();
+  }, [allSolicitacoes]);
+
+  // Exibe apenas as cidades vinculadas ao UF selecionado (se houver UF ativo)
+  const cidades = useMemo(() => {
+    const solicitacoesFiltradas = filters.uf
+      ? allSolicitacoes.filter((s: any) => s.solic_uf === filters.uf)
+      : allSolicitacoes;
+
+    return Array.from(new Set(solicitacoesFiltradas.map((s: any) => s.solic_cidade).filter(Boolean))).sort();
+  }, [allSolicitacoes, filters.uf]);
+
   const empresas = useMemo(() => {
     const unique = Array.from(new Set(allSolicitacoes.map((s: any) => s.solic_empresa_parceira).filter(Boolean)));
     return unique.length > 0 ? unique : EMPRESAS_PARCEIRAS;
   }, [allSolicitacoes]);
+
+  const handleUfChange = (selectedUf: string) => {
+    const newUf = selectedUf === 'all' ? '' : selectedUf;
+    onFilterChange({
+      ...filters,
+      uf: newUf,
+      cidade: '', // Reseta o município para evitar incoerência
+    });
+  };
 
   const handleClearFilters = () => {
     onFilterChange({
       searchTerm: '',
       status: '',
       projeto: '',
+      servico: '',
+      cidade: '',
+      uf: '',
       empresaParceira: '',
       semana: '',
       mes: '',
@@ -197,6 +226,54 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
               </Select>
             </div>
 
+            {/* Serviço */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Serviço</label>
+              <Select value={filters.servico || 'all'} onValueChange={(value) => onFilterChange({ ...filters, servico: value === 'all' ? '' : value })}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecionar serviço" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {servicos.map(servico => (
+                    <SelectItem key={servico} value={servico}>{servico}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* UF */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">UF</label>
+              <Select value={filters.uf || 'all'} onValueChange={handleUfChange}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecionar UF" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas</SelectItem>
+                  {ufs.map(uf => (
+                    <SelectItem key={uf} value={uf}>{uf}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Município / Cidade */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-2 block">Município</label>
+              <Select value={filters.cidade || 'all'} onValueChange={(value) => onFilterChange({ ...filters, cidade: value === 'all' ? '' : value })}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Selecionar município" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {cidades.map(cidade => (
+                    <SelectItem key={cidade} value={cidade}>{cidade}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Empresa Parceira */}
             <div>
               <label className="text-sm font-medium text-foreground mb-2 block">Empresa Parceira</label>
@@ -261,7 +338,6 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
               </Select>
             </div>
 
-
             {/* Botões */}
             <div className="pt-4 border-t border-border space-y-2">
               {hasActiveFilters && (
@@ -285,7 +361,6 @@ export function UnifiedFilterPanel({ filters, onFilterChange, onExport, currentS
                   Exportar
                 </Button>
               )}
-
             </div>
           </div>
         )}

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { Trash2, Edit2, Plus, Star, Search } from 'lucide-react';
+import { Trash2, Edit2, Plus, Star, Search, Filter } from 'lucide-react';
 import { useLocation } from 'wouter';
 import TecnicoCard from '@/components/TecnicoCard';
 import { EquipamentosForm } from '@/components/EquipamentosForm';
@@ -24,6 +24,8 @@ export default function Tecnicos() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCidade, setSelectedCidade] = useState('');
+  const [selectedUF, setSelectedUF] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [avaliacao, setAvaliacao] = useState(0);
@@ -111,17 +113,42 @@ export default function Tecnicos() {
     }));
   }, [tecnicos]);
 
-  // Filtrar técnicos por nome
+  // Extrair UFs e Cidades únicas para preencher os seletores
+  const listaUFs = useMemo(() => {
+    const ufs = transformedTecnicos
+      .map(t => t.tecUF?.toUpperCase().trim())
+      .filter((uf): uf is string => Boolean(uf));
+    return Array.from(new Set(ufs)).sort();
+  }, [transformedTecnicos]);
+
+  const listaCidades = useMemo(() => {
+    const cidades = transformedTecnicos
+      .filter(t => !selectedUF || t.tecUF?.toUpperCase().trim() === selectedUF)
+      .map(t => t.tecCidade?.trim())
+      .filter((cidade): cidade is string => Boolean(cidade));
+    return Array.from(new Set(cidades)).sort();
+  }, [transformedTecnicos, selectedUF]);
+
   const filteredTecnicos = useMemo(() => {
-    return transformedTecnicos.filter(t =>
-      t.tecNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.tecTelefone.includes(searchTerm)
-    );
-  }, [transformedTecnicos, searchTerm]);
+    const term = searchTerm.toLowerCase();
+
+    return transformedTecnicos.filter(t => {
+      const nome = (t.tecNome || '').toLowerCase();
+      const telefone = (t.tecTelefone || '').toLowerCase();
+      const cidade = (t.tecCidade || '').toLowerCase();
+      const uf = (t.tecUF || '').toUpperCase().trim();
+
+      const matchesSearch = nome.includes(term) || telefone.includes(term);
+      const matchesCidade = !selectedCidade || cidade === selectedCidade.toLowerCase();
+      const matchesUF = !selectedUF || uf === selectedUF;
+
+      return matchesSearch && matchesCidade && matchesUF;
+    });
+  }, [transformedTecnicos, searchTerm, selectedCidade, selectedUF]);
 
   const handleBuscarCEP = async (cep: string) => {
     if (cep.length !== 8) return;
-    
+
     setBuscandoCEP(true);
     try {
       const endereco = await buscarEnderecoPorCEP(cep);
@@ -156,7 +183,6 @@ export default function Tecnicos() {
 
     setSalvando(true);
     try {
-      // 🔥 GEOCODIFICAÇÃO AUTOMÁTICA
       setGeocodificando(true);
       console.log('🔍 Iniciando geocodificação para técnico...');
       const coords = await geocodeAddress({
@@ -178,7 +204,6 @@ export default function Tecnicos() {
       setGeocodificando(false);
 
       if (editingId) {
-        // Update
         await updateMutation.mutateAsync({
           id: editingId,
           tec_nome: formData.tecNome,
@@ -194,19 +219,16 @@ export default function Tecnicos() {
           tec_uf: formData.tecUF,
           tec_empresa_parceira: formData.tecEmpresaParceira,
           tec_observacoes: formData.tecObservacoes,
-          // Individual evaluation fields
           tec_avaliacao_pontualidade: formData.tecAvaliacaoPontualidade || 0,
           tec_avaliacao_ferramentas: formData.tecAvaliacaoFerramentas || 0,
           tec_avaliacao_produtividade: formData.tecAvaliacaoProdutividade || 0,
           tec_avaliacao_conhecimento: formData.tecAvaliacaoConhecimento || 0,
           tec_avaliacao_flexibilidade: formData.tecAvaliacaoFlexibilidade || 0,
-          // Average evaluation
           tec_avaliacao: Math.round(((formData.tecAvaliacaoPontualidade || 0) + (formData.tecAvaliacaoFerramentas || 0) + (formData.tecAvaliacaoProdutividade || 0) + (formData.tecAvaliacaoConhecimento || 0) + (formData.tecAvaliacaoFlexibilidade || 0)) / 5 * 100) / 100,
           ...(coords && { lat: coords.lat, long: coords.lng })
         });
         toast.success('Técnico atualizado com sucesso');
       } else {
-        // Create
         await createMutation.mutateAsync({
           tec_nome: formData.tecNome,
           tec_telefone: formData.tecTelefone,
@@ -214,7 +236,6 @@ export default function Tecnicos() {
           tec_rg: formData.tecRG,
           tec_cep: formData.tecCEP,
           tec_rua: formData.tecRua,
-          // Individual evaluation fields
           tec_avaliacao_pontualidade: formData.tecAvaliacaoPontualidade || 0,
           tec_avaliacao_ferramentas: formData.tecAvaliacaoFerramentas || 0,
           tec_avaliacao_produtividade: formData.tecAvaliacaoProdutividade || 0,
@@ -232,7 +253,7 @@ export default function Tecnicos() {
         });
         toast.success('Técnico criado com sucesso');
       }
-      
+
       setShowModal(false);
       clearFormData();
       setFormData(initialFormData);
@@ -247,50 +268,23 @@ export default function Tecnicos() {
     }
   };
 
-
-
   const handleEditar = (tecnico: Tecnico) => {
-    // Redirecionar para página de detalhes em vez de abrir modal
     setLocation(`/tecnicos/${tecnico.id}`);
   };
 
   const handleFecharModal = () => {
     setShowModal(false);
     setEditingId(null);
-    setFormData({
-      tecNome: '',
-      tecTelefone: '',
-      tecCPF: '',
-      tecRG: '',
-      tecCEP: '',
-      tecRua: '',
-      tecNumero: '',
-      tecComplemento: '',
-      tecBairro: '',
-      tecCidade: '',
-      tecUF: '',
-      tecEmpresaParceira: '',
-      tecObservacoes: '',
-      tecAvaliacaoPontualidade: 0,
-      tecAvaliacaoFerramentas: 0,
-      tecAvaliacaoProdutividade: 0,
-      tecAvaliacaoConhecimento: 0,
-      tecAvaliacaoFlexibilidade: 0
-    });
+    setFormData(initialFormData);
     setAvaliacao(0);
   };
 
   const handleDeletarTecnico = async (id: string, nome: string) => {
-    console.log('[FRONTEND DELETE] Starting delete for:', { id, nome });
     if (!confirm(`Tem certeza que deseja deletar o técnico ${nome}?`)) return;
     try {
-      console.log('[FRONTEND DELETE] Calling mutation with ID:', id);
       await deleteMutation.mutateAsync({ id });
-      console.log('[FRONTEND DELETE] Delete successful');
       toast.success('Técnico deletado com sucesso');
-      console.log('[FRONTEND DELETE] Calling refetch');
       await refetch();
-      console.log('[FRONTEND DELETE] Refetch completed');
     } catch (err) {
       console.error('[FRONTEND DELETE] Error:', err);
       toast.error('Erro ao deletar técnico');
@@ -308,23 +302,74 @@ export default function Tecnicos() {
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Técnicos</h1>
           <p className="text-sm md:text-base text-muted-foreground">Gerencie todos os técnicos do sistema</p>
         </div>
+
         <div className="flex justify-between items-center">
-        <Button onClick={() => setShowModal(true)} className="gap-2">
-          <Plus size={20} />
-          Adicionar Técnico
-        </Button>
+          <Button onClick={() => setShowModal(true)} className="gap-2">
+            <Plus size={20} />
+            Adicionar Técnico
+          </Button>
         </div>
 
-        {/* Search Bar */}
-        <div className="relative">
-          <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-          <Input
-            placeholder="Buscar por nome ou telefone..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
+        {/* Search Bar e Filtros de Localização */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="relative md:col-span-2">
+            <Search className="absolute left-3 top-3 text-gray-400" size={20} />
+            <Input
+              placeholder="Buscar por nome ou telefone..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          <div>
+            <select
+              value={selectedUF}
+              onChange={(e) => {
+                setSelectedUF(e.target.value);
+                setSelectedCidade('');
+              }}
+              className="w-full h-10 border rounded-md px-3 bg-background text-sm"
+            >
+              <option value="">Todas as UFs</option>
+              {listaUFs.map(uf => (
+                <option key={uf} value={uf}>{uf}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <select
+              value={selectedCidade}
+              onChange={(e) => setSelectedCidade(e.target.value)}
+              className="w-full h-10 border rounded-md px-3 bg-background text-sm"
+            >
+              <option value="">Todas as Cidades</option>
+              {listaCidades.map(cidade => (
+                <option key={cidade} value={cidade}>{cidade}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        {/* Limpar Filtros */}
+        {(searchTerm || selectedCidade || selectedUF) && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>Filtros ativos:</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedCidade('');
+                setSelectedUF('');
+              }}
+              className="h-auto p-1 text-xs text-blue-600 hover:text-blue-800"
+            >
+              Limpar filtros
+            </Button>
+          </div>
+        )}
 
         {/* Técnicos List - Horizontal Layout */}
         <div className="space-y-3">
@@ -336,6 +381,12 @@ export default function Tecnicos() {
               onDelete={() => handleDeletarTecnico(tecnico.id, tecnico.tecNome)}
             />
           ))}
+
+          {filteredTecnicos.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground">
+              Nenhum técnico encontrado para os filtros selecionados.
+            </div>
+          )}
         </div>
 
         {/* Modal */}
@@ -408,7 +459,6 @@ export default function Tecnicos() {
                   onChange={(e) => {
                     const cepValue = aplicarMascaraCEP(e.target.value);
                     setFormData({...formData, tecCEP: cepValue});
-                    // Auto-preenchimento quando digitar 8 dígitos
                     if (cepValue.replace('-', '').length === 8) {
                       handleBuscarCEP(cepValue.replace('-', ''));
                     }
@@ -633,16 +683,13 @@ export default function Tecnicos() {
               )}
             </div>
 
-
-
             {/* Tabs for Equipment Management */}
             {editingId && (
               <div className="border-t pt-4 mt-4">
-                {editingId && (
-                  <EquipmentHistoryTab tecnicoId={editingId} tecnicoNome={formData.tecNome} />
-                )}
+                <EquipmentHistoryTab tecnicoId={editingId} tecnicoNome={formData.tecNome} />
               </div>
             )}
+
             <DialogFooter>
               <Button variant="outline" onClick={handleFecharModal}>
                 Cancelar
@@ -656,7 +703,7 @@ export default function Tecnicos() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        </div>
+      </div>
     </div>
   );
 }

@@ -1,9 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 export interface FilterState {
   searchTerm: string;
   status: string;
   projeto: string;
+  servico: string;
+  cidade: string; // <-- Adicionado
+  uf: string;     // <-- Adicionado
   dia: 'hoje' | 'ontem' | 'amanha' | '';
   semana: 'esta-semana' | 'semana-passada' | '';
   mes: string;
@@ -20,10 +23,15 @@ export interface FilterState {
   dataConclusaoEnd: string;
 }
 
+const STORAGE_KEY = 'solicitacoes_filters_state';
+
 const initialFilterState: FilterState = {
   searchTerm: '',
   status: '',
   projeto: '',
+  servico: '',
+  cidade: '', // <-- Adicionado
+  uf: '',     // <-- Adicionado
   dia: '',
   semana: '',
   mes: '',
@@ -41,7 +49,24 @@ const initialFilterState: FilterState = {
 };
 
 export function useFilters() {
-  const [filters, setFilters] = useState<FilterState>(initialFilterState);
+  // Inicializa o estado com o valor salvo no localStorage, se existir
+  const [filters, setFilters] = useState<FilterState>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? { ...initialFilterState, ...JSON.parse(saved) } : initialFilterState;
+    } catch {
+      return initialFilterState;
+    }
+  });
+
+  // Salva no localStorage sempre que o objeto filters mudar
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(filters));
+    } catch (e) {
+      console.error('Erro ao salvar filtros no localStorage', e);
+    }
+  }, [filters]);
 
   const updateFilter = useCallback((key: keyof FilterState, value: string) => {
     setFilters(prev => ({
@@ -59,6 +84,11 @@ export function useFilters() {
 
   const clearFilters = useCallback(() => {
     setFilters(initialFilterState);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error('Erro ao limpar localStorage', e);
+    }
   }, []);
 
   const getActiveFilterCount = useCallback(() => {
@@ -70,6 +100,9 @@ export function useFilters() {
     if (filters.searchTerm) active.push('Busca');
     if (filters.status) active.push('Status');
     if (filters.projeto) active.push('Projeto');
+    if (filters.servico) active.push('Serviço');
+    if (filters.cidade) active.push('Município'); // <-- Exibição no badge/ativo
+    if (filters.uf) active.push('UF');           // <-- Exibição no badge/ativo
     if (filters.dia) active.push('Dia');
     if (filters.semana) active.push('Semana');
     if (filters.mes) active.push('Mês');

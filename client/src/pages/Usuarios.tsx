@@ -18,6 +18,7 @@ interface Usuario {
   login_method: string;
   created_at: string;
   updated_at: string | undefined;
+  last_sign_in_at?: string | null;
 }
 
 export default function Usuarios() {
@@ -94,12 +95,6 @@ export default function Usuarios() {
     return false;
   };
 
-  const canCreateRole = (role: string) => {
-    if (user?.role === 'adminmaster') return true;
-    if (user?.role === 'admin' && (role === 'admin' || role === 'analista')) return true;
-    return false;
-  };
-
   // Filter users
   const usuariosFiltrados = usuarios.filter((u: Usuario) =>
     u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -120,6 +115,7 @@ export default function Usuarios() {
         email: formData.email,
         name: formData.name,
         role: formData.role,
+        password: formData.password || undefined,
       });
     } else {
       if (!formData.password || formData.password.length < 6) {
@@ -275,36 +271,57 @@ export default function Usuarios() {
                   <div className="flex-1">
                     <h3 className="font-semibold text-lg">{usuario.name || 'Sem nome'}</h3>
                     <p className="text-muted-foreground">{usuario.email}</p>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex flex-wrap gap-2 mt-2">
                       <Badge className={getRoleBadgeColor(usuario.role)}>
                         {getRoleLabel(usuario.role)}
                       </Badge>
-                      <Badge variant="secondary">
-                        {usuario.created_at ? new Date(usuario.created_at).toLocaleDateString('pt-BR') : '-'}
+                      
+                      <Badge variant="outline" className="text-gray-600 border-gray-300">
+                        Criado em: {usuario.created_at ? new Date(usuario.created_at).toLocaleDateString('pt-BR') : '-'}
+                      </Badge>
+
+                      <Badge 
+                        variant="secondary" 
+                        className={
+                          usuario.last_sign_in_at 
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
+                            : "bg-gray-100 text-gray-500"
+                        }
+                      >
+                        {usuario.last_sign_in_at 
+                          ? `Último acesso: ${new Date(usuario.last_sign_in_at).toLocaleString('pt-BR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}`
+                          : 'Nunca acessou'}
                       </Badge>
                     </div>
                   </div>
-                </div>
-                <div className="flex gap-2">
-                  {canEditUser(usuario.role) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditar(usuario)}
-                    >
-                      <Edit2 size={16} />
-                    </Button>
-                  )}
-                  {canDeleteUser(usuario.role) && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDeletar(usuario.id, usuario.role)}
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 size={16} />
-                    </Button>
-                  )}
+                  
+                  <div className="flex gap-2">
+                    {canEditUser(usuario.role) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditar(usuario)}
+                      >
+                        <Edit2 size={16} />
+                      </Button>
+                    )}
+                    {canDeleteUser(usuario.role) && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeletar(usuario.id, usuario.role)}
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 size={16} />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </Card>
             ))}
@@ -365,7 +382,7 @@ export default function Usuarios() {
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="Deixe em branco para manter a senha atual"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Minimo 6 caracteres se preenchido</p>
+                  <p className="text-xs text-gray-500 mt-1">Mínimo 6 caracteres se preenchido</p>
                 </div>
               )}
 
