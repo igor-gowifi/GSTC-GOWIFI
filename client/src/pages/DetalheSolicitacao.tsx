@@ -966,6 +966,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
         onClose={() => setShowTecnicoModal(false)}
         onSelectTechnician={handleSelectTecnico}
         technicians={nearbyTecnicos}
+        allTechnicians={tecnicos} // <-- Adicionado para busca global por nome
         isLoading={isLoadingTecnicos}
         currentTechnicianId={formData.solic_tecnico_id}
       />

@@ -1,12 +1,16 @@
+version: '3.8'
+
 services:
-  app:
+  app-staging:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: gowifi-app
+    container_name: gowifi-app-staging
     restart: unless-stopped
+    ports:
+      - '3001:3000' # Mapeia a porta 3001 externa para a 3000 do container
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development # Ou staging
       - PORT=3000
       - DATABASE_URL=${DATABASE_URL}
       - SUPABASE_URL=${SUPABASE_URL}
@@ -20,32 +24,17 @@ services:
       - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
       - BUILT_IN_FORGE_API_URL=${BUILT_IN_FORGE_API_URL}
       - BUILT_IN_FORGE_API_KEY=${BUILT_IN_FORGE_API_KEY}
-      - VITE_APP_TITLE=${VITE_APP_TITLE}
+      - VITE_APP_TITLE=${VITE_APP_TITLE} (BETA)
       - VITE_APP_LOGO=${VITE_APP_LOGO}
     networks:
-      - gowifi-network
+      - gowifi-staging-network
     volumes:
+      # Mapeamentos para desenvolvimento e hot-reload
       - .:/app
       - /app/node_modules
       - /app/.pnpm-store
       - ./database:/app/database
 
-  nginx:
-    image: 'jc21/nginx-proxy-manager:latest'
-    container_name: gowifi-nginx
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '81:81'
-      - '443:443'
-    volumes:
-      - ./npm-data:/data
-      - ./npm-letsencrypt:/etc/letsencrypt
-    networks:
-      - gowifi-network
-    depends_on:
-      - app
-
 networks:
-  gowifi-network:
+  gowifi-staging-network:
     driver: bridge
