@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gowifi-app-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    networks:
+      - gowifi-network
+    volumes:
+      - ./database:/app/database
+
+  nginx:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: gowifi-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '81:81'
+      - '443:443'
+    volumes:
+      - ./npm-data:/data
+      - ./npm-letsencrypt:/etc/letsencrypt
+    networks:
+      - gowifi-network
+    depends_on:
+      - app
+
+networks:
+  gowifi-network:
+    driver: bridge
