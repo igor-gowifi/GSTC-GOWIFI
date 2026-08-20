@@ -10,7 +10,7 @@ import { useFilters } from '@/hooks/useFilters';
 import { UnifiedFilterPanel } from '@/components/UnifiedFilterPanel';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { useLocation } from 'wouter';
+import { useLocation, Link } from 'wouter';
 import { formatDatePtBr, formatTimePtBr } from '@/lib/dateFormatter';
 import { useAuth } from '@/_core/hooks/useAuth';
 import Fuse from 'fuse.js';
@@ -429,11 +429,13 @@ export default function Solicitacoes() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleViewDetails(sol)}
+                            asChild
                             className="flex items-center gap-2"
                           >
-                            <Eye className="w-4 h-4" />
-                            Ver Detalhes
+                            <Link href={`/detalhes/${sol.id}`}>
+                              <Eye className="w-4 h-4" />
+                              Ver Detalhes
+                            </Link>
                           </Button>
                         </div>
                       </div>
