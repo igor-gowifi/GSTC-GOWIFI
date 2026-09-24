@@ -291,6 +291,11 @@ export const solicitacoesRouter = router({
           query = query.gte('solic_data_conclusao', input.dataConclusaoStart);
         }
 
+        // Localize onde estão os outros filtros e adicione:
+        if (input.servico) {
+          query = query.ilike('solic_servico', input.servico);
+        }
+
         if (input.dataConclusaoEnd) {
           query = query.lte('solic_data_conclusao', input.dataConclusaoEnd);
         }

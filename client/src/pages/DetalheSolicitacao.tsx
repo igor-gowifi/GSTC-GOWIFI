@@ -16,36 +16,8 @@ import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup
 import { aplicarMascaraCEP } from '@/utils/masks';
 import { useState, useMemo, useEffect } from 'react';
 import { useNearbyTechnicians } from '@/hooks/useNearbyTechnicians';
+import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
 
-const GRUPOS_PROJETO = [
-  'WiFi Seguro',
-  'Projetos Especiais',
-  'Bradesco',
-  'Bradesco - Fase2',
-  'Bradesco - Migração',
-  'Santander',
-  'PUC-SP',
-  'Hotelaria',
-  'Telemedicina',
-  'Escola Santa Maria',
-  'Viasat',
-  'Daiki Sushi',
-];
-
-const SERVICOS = [
-  'Desativação',
-  'Instalação',
-  'Suporte',
-  'Troca de Endereço',
-];
-
-const OPERADORAS = [
-  'Claro Empresas',
-  'Hughes',
-  'Gowifi',
-  'ViaSat',
-  'Outro',
-];
 
 export default function DetalheSolicitacao() {
   const { user } = useAuth();
@@ -55,6 +27,12 @@ export default function DetalheSolicitacao() {
   const [showTecnicoModal, setShowTecnicoModal] = useState(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [formData, setFormData] = useState<any>({});
+  const {
+  GRUPOS_PROJETO,
+  SERVICOS,
+  OPERADORAS,
+  statusMapping
+} = useSolicitacaoOptions();
   
   // Instância do Hook Customizado de Busca de Técnicos
   const { nearbyTecnicos, isSearching: isLoadingTecnicos, searchTechnicians } = useNearbyTechnicians();
@@ -103,24 +81,6 @@ Procurar por: ${formData.solic_contato_local || 'N/A'}
 Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
   }, [formData, tecnicoAssociado]);
 
-  const statusMapping: Record<string, string> = {
-    'Pendente': 'Pendente',
-    'pendente': 'Pendente',
-    'Em Progresso': 'Agendado',
-    'em_progresso': 'Agendado',
-    'atribuidas': 'Agendado',
-    'atribuido': 'Agendado',
-    'agendado': 'Agendado',
-    'Agendado': 'Agendado',
-    'Concluido': 'Concluído',
-    'concluido': 'Concluído',
-    'Concluído': 'Concluído',
-    'Cancelado': 'Improdutivo',
-    'cancelado': 'Improdutivo',
-    'improdutivas': 'Improdutivo',
-    'improdutivo': 'Improdutivo',
-    'Improdutivo': 'Improdutivo',
-  };
   
   const faturamentoMapping: Record<string, string> = {
     'nao-pago': 'Não Pago',
@@ -138,7 +98,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       };
       setFormData(mappedSolicitacao);
     }
-  }, [solicitacao]);
+  }, [solicitacao, statusMapping]);
 
   const handleEditToggle = () => {
     if (isEditMode) {
@@ -318,7 +278,15 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
     }
   };
 
-  const statusOptions = ['Pendente', 'Agendado', 'Concluído', 'Improdutivo'];
+  const statusOptions = [
+  'Pendente',
+  'Em programação',
+  'Agendado',
+  'Concluído/Produtivo',
+  'Improdutivo',
+  'Cancelada',
+  'Aguardando Claro'
+];
   const faturamentoOptions = ['Pago', 'Não Pago'];
 
   if (!solicitacao) {

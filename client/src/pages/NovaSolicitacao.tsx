@@ -12,40 +12,17 @@ import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup
 import { geocodeAddress } from '@/utils/geocodeAddress';
 import { aplicarMascaraCEP } from '@/utils/masks';
 import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
+import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
 
-const GRUPOS_PROJETO = [
-  'WiFi Seguro',
-  'Projetos Especiais',
-  'Bradesco',
-  'Bradesco - Fase2',
-  'Bradesco - Migrações',
-  'Santander',
-  'PUC-SP',
-  'Hotelaria',
-  'Telemedicina',
-  'Escola Santa Maria',
-  'Viasat',
-  'Daiki Sushi',
-];
-
-const SERVICOS = [
-  'Desativação',
-  'Instalação',
-  'Suporte',
-  'Troca de Endereço',
-];
-
-const OPERADORAS = [
-  'Claro Empresas',
-  'Hughes',
-  'Gowifi',
-  'ViaSat',
-  'Outro',
-];
 
 export default function NovaSolicitacao() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
+  const {
+  GRUPOS_PROJETO,
+  SERVICOS,
+  OPERADORAS
+} = useSolicitacaoOptions();
 
   // 1. Estado Unificado do Formulário
   const [formData, setFormData] = useState({
