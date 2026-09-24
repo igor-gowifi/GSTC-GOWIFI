@@ -176,44 +176,74 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
     setIsEditMode(false);
   };
 
-  const handleSelectTecnico = (tecnico: any) => {
-    setFormData({
-      ...formData,
-      solic_tecnico_id: tecnico.id
-    });
-    toast.success(`Técnico ${tecnico.tec_nome} selecionado!`);
-    setShowTecnicoModal(false);
-  };
+  const handleSelectTecnico = async (tecnico: any) => {
+  if (!pathId) {
+    toast.error('ID da solicitação não encontrado.');
+    return;
+  }
 
-  const handleOpenTecnicoModal = async () => {
-    let lat = Number(formData.solic_latitude || formData.latitude || 0);
-    let lon = Number(formData.solic_longitude || formData.longitude || 0);
+  try {
+    toast.loading('Salvando técnico selecionado...');
 
-    // Tenta buscar a coordenada via CEP primeiro se disponível
-    if (formData.solic_cep) {
-      try {
-        const cepLimpo = String(formData.solic_cep).replace(/\D/g, '');
-        if (cepLimpo.length === 8) {
-          const endereco = await buscarEnderecoPorCEP(cepLimpo);
-          if (endereco?.latitude && endereco?.longitude) {
-            lat = Number(endereco.latitude);
-            lon = Number(endereco.longitude);
-          }
-        }
-      } catch (error) {
-        console.error('Erro ao buscar coordenadas via CEP:', error);
+    const tecnicoIdStr = String(tecnico.id);
+
+    // 1. Atualiza estado local
+    setFormData((prev: any) => ({
+      ...prev,
+      solic_tecnico_id: tecnicoIdStr
+    }));
+
+    // 2. Dispara a atualização alinhada com o Zod schema de `solicitacoes.update`
+    await updateMutation.mutateAsync({
+      id: String(pathId),
+      tecnicoId: tecnicoIdStr,
+      tecnicoEscolhido: {
+        id: tecnicoIdStr,
+        nome: tecnico.tec_nome || tecnico.nome || 'Técnico Sem Nome',
+        telefone: tecnico.tec_telefone || tecnico.telefone || '',
+        cpf: tecnico.tec_cpf || tecnico.cpf || ''
       }
-    }
+    });
 
-    if (!lat || !lon) {
-      toast.error('Solicitação não possui coordenadas válidas para calcular a distância.');
-      return;
-    }
+    toast.dismiss();
+    toast.success(`Técnico ${tecnico.tec_nome || ''} salvo com sucesso!`);
+    setShowTecnicoModal(false);
+  } catch (error: any) {
+    toast.dismiss();
+    toast.error('Erro ao salvar técnico no banco de dados');
+    console.error('Erro tRPC detalhado:', error);
+  }
+};
 
-    // Dispara a busca via hook isolado
-    searchTechnicians(tecnicos, { lat, lng: lon });
-    setShowTecnicoModal(true);
-  };
+const handleOpenTecnicoModal = async () => {
+  let lat = Number(formData.solic_latitude || formData.latitude || 0);
+  let lon = Number(formData.solic_longitude || formData.longitude || 0);
+
+  // Tenta buscar a coordenada via CEP primeiro se disponível
+  if (formData.solic_cep) {
+    try {
+      const cepLimpo = String(formData.solic_cep).replace(/\D/g, '');
+      if (cepLimpo.length === 8) {
+        const endereco = await buscarEnderecoPorCEP(cepLimpo);
+        if (endereco?.latitude && endereco?.longitude) {
+          lat = Number(endereco.latitude);
+          lon = Number(endereco.longitude);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao buscar coordenadas via CEP:', error);
+    }
+  }
+
+  if (!lat || !lon) {
+    toast.error('Solicitação não possui coordenadas válidas para calcular a distância.');
+    return;
+  }
+
+  // Dispara a busca via hook isolado
+  searchTechnicians(tecnicos, { lat, lng: lon });
+  setShowTecnicoModal(true);
+};
 
   const handleDelete = async () => {
     if (!confirm('Tem certeza que deseja deletar esta solicitação?')) return;
