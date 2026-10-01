@@ -54,6 +54,7 @@ export default function DetalheEquipamento() {
     }
   }, [equipamento]);
 
+
   const handleFieldChange = (field: string, value: string) => {
     setFormData((prev: any) => ({
       ...prev,

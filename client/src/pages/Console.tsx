@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/select';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
+
 export default function Console() {
   const [searchTerm, setSearchTerm] = useState('');
   const [periodFilter, setPeriodFilter] = useState('Tudo');

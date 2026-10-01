@@ -41,6 +41,11 @@ export default function Consulta() {
     }
   }, [formData.cep]);
 
+  useEffect(() => {
+    document.title = 'Consulta | GoWiFi';
+  }, []);
+  
+
   const buscarEnderecoCEP = async (cep: string) => {
     try {
       setBuscandoCEP(true);

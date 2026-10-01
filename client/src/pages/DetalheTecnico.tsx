@@ -12,6 +12,7 @@ import { Tecnico, EMPRESAS_PARCEIRAS } from '@/types';
 import { trpc } from '@/lib/trpc';
 import { EquipmentHistoryTab } from '@/components/EquipmentHistoryTab';
 
+
 export default function DetalheTecnico() {
   const [, params] = useRoute('/tecnicos/:id');
   const [, setLocation] = useLocation();

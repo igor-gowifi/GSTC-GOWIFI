@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, Star, Phone, Building2, CheckCircle2, Search } from 'lucide-react';
 
 interface Technician {
@@ -47,12 +47,13 @@ export function TechnicianSearchModal({
   const [searchTerm, setSearchTerm] = useState('');
 
   const sortedTechnicians = useMemo(() => {
-    // Se digitou algo na busca, pesquisa na base completa (allTechnicians)
     const query = searchTerm.trim().toLowerCase();
     
+    // 1. Define a lista base (pesquisa global ou por proximidade)
+    let list: Technician[] = [];
     if (query !== '') {
       const sourceList = allTechnicians.length > 0 ? allTechnicians : technicians;
-      return sourceList.filter(
+      list = sourceList.filter(
         (tec) =>
           tec.tec_nome?.toLowerCase().includes(query) ||
           tec.tec_telefone?.toLowerCase().includes(query) ||
@@ -60,26 +61,26 @@ export function TechnicianSearchModal({
           tec.tec_cidade?.toLowerCase().includes(query) ||
           tec.tec_uf?.toLowerCase().includes(query)
       );
+    } else {
+      list = [...technicians];
     }
 
-    // Se a busca estiver vazia, utiliza a lista por proximidade e aplica a ordenação selecionada
-    const listToOrder = [...technicians];
-
+    // 2. Aplica a ordenação selecionada (Avaliação ou Distância)
     if (sortBy === 'rating') {
-      listToOrder.sort((a, b) => {
+      list.sort((a, b) => {
         const ratingA = parseFloat(String(a.tec_avaliacao)) || 0;
         const ratingB = parseFloat(String(b.tec_avaliacao)) || 0;
         return ratingB - ratingA;
       });
     } else {
-      listToOrder.sort((a, b) => {
+      list.sort((a, b) => {
         const distA = a.distanciaKm ?? a.distancia ?? Infinity;
         const distB = b.distanciaKm ?? b.distancia ?? Infinity;
         return distA - distB;
       });
     }
 
-    return listToOrder;
+    return list;
   }, [technicians, allTechnicians, sortBy, searchTerm]);
 
   const handleSelectTechnician = (technician: Technician) => {
@@ -132,9 +133,8 @@ export function TechnicianSearchModal({
                   <TechnicianCard
                     key={technician.id}
                     technician={technician}
-                    isSelected={currentTechnicianId === technician.id}
+                    isSelected={currentTechnicianId === String(technician.id)}
                     onSelect={() => handleSelectTechnician(technician)}
-                    sortBy={sortBy}
                   />
                 ))}
               </div>
@@ -150,12 +150,18 @@ interface TechnicianCardProps {
   technician: Technician;
   isSelected: boolean;
   onSelect: () => void;
-  sortBy: 'distance' | 'rating';
 }
 
 function TechnicianCard({ technician, isSelected, onSelect }: TechnicianCardProps) {
   const rating = parseFloat(String(technician.tec_avaliacao)) || 0;
   const distance = technician.distanciaKm ?? technician.distancia;
+
+  // Formatação segura de endereço
+  const enderecoFormatado = [
+    technician.tec_rua && technician.tec_numero ? `${technician.tec_rua}, ${technician.tec_numero}` : technician.tec_rua,
+    technician.tec_bairro,
+    technician.tec_cidade && technician.tec_uf ? `${technician.tec_cidade}/${technician.tec_uf}` : technician.tec_cidade
+  ].filter(Boolean).join(' - ');
 
   return (
     <Card
@@ -172,21 +178,24 @@ function TechnicianCard({ technician, isSelected, onSelect }: TechnicianCardProp
           </div>
 
           <div className="space-y-1 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <Phone className="w-4 h-4" />
-              <span>{technician.tec_telefone}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4" />
-              <span>{technician.tec_empresa_parceira}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4" />
-              <span>
-                {technician.tec_rua}, {technician.tec_numero} - {technician.tec_bairro},{' '}
-                {technician.tec_cidade} - {technician.tec_uf}
-              </span>
-            </div>
+            {technician.tec_telefone && (
+              <div className="flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                <span>{technician.tec_telefone}</span>
+              </div>
+            )}
+            {technician.tec_empresa_parceira && (
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4" />
+                <span>{technician.tec_empresa_parceira}</span>
+              </div>
+            )}
+            {enderecoFormatado && (
+              <div className="flex items-center gap-2">
+                <MapPin className="w-4 h-4" />
+                <span>{enderecoFormatado}</span>
+              </div>
+            )}
           </div>
         </div>
 
