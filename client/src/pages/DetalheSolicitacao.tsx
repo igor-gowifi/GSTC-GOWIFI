@@ -4,20 +4,46 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useLocation } from 'wouter';
+import { useEffect, useState, useMemo } from 'react';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
-import { formatDatePtBr, formatTimePtBr } from '@/lib/dateFormatter';
+import { formatDatePtBr, formatTimePtBr, formatDateTimePtBr } from '@/lib/dateFormatter';
 import { Save, X, Trash2, Edit3, Copy, Send } from 'lucide-react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { aplicarMascaraCEP } from '@/utils/masks';
-import { useState, useMemo, useEffect } from 'react';
-import { useNearbyTechnicians } from '@/hooks/useNearbyTechnicians';
-import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
 
+const GRUPOS_PROJETO = [
+  'WiFi Seguro',
+  'Projetos Especiais',
+  'Bradesco',
+  'Santander',
+  'PUC-Universidade',
+  'Hotelarias',
+  'Telemedicina',
+  'Escola Santa Maria',
+  'Viasat',
+  'Daiki Sushi',
+];
+
+const SERVICOS = [
+  'Desativação',
+  'Instalação',
+  'Suporte',
+  'Troca de Endereço',
+];
+
+const OPERADORAS = [
+  'Primesys',
+  'Claro Empresas',
+  'Hughes',
+  'Gowifi',
+  'PUC',
+  'Outro',
+];
 
 export default function DetalheSolicitacao() {
   const { user } = useAuth();
@@ -27,21 +53,22 @@ export default function DetalheSolicitacao() {
   const [showTecnicoModal, setShowTecnicoModal] = useState(false);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [formData, setFormData] = useState<any>({});
-  const {
-  GRUPOS_PROJETO,
-  SERVICOS,
-  OPERADORAS,
-  statusMapping
-} = useSolicitacaoOptions();
+  const [selectedTecnicoFromModal, setSelectedTecnicoFromModal] = useState<any>(null);
+  const [modalCoords, setModalCoords] = useState({ latitude: 0, longitude: 0 });
   
-  // Instância do Hook Customizado de Busca de Técnicos
-  const { nearbyTecnicos, isSearching: isLoadingTecnicos, searchTechnicians } = useNearbyTechnicians();
-
   const { data: solicitacoesData = [] } = trpc.solicitacoes.list.useQuery();
   const { data: tecnicos = [] } = trpc.tecnicos.list.useQuery();
   const sendToFreshdesk = trpc.solicitacoes.sendToFreshdesk.useMutation();
   const deleteMutation = trpc.solicitacoes.delete.useMutation();
-  const updateMutation = trpc.solicitacoes.update.useMutation();
+  const { data: nearbyTecnicos = [], isLoading: isLoadingTecnicos } = trpc.solicitacoes.findNearestTecnicos.useQuery(
+    {
+      latitude: modalCoords.latitude,
+      longitude: modalCoords.longitude,
+      limit: 10,
+      sortBy: 'distance'
+    },
+    { enabled: showTecnicoModal && modalCoords.latitude !== 0 && modalCoords.longitude !== 0 }
+  );
 
   const solicitacao = useMemo(() => {
     if (!pathId) return null;
@@ -53,6 +80,7 @@ export default function DetalheSolicitacao() {
     return tecnicos.find((t: any) => String(t.id) === String(formData.solic_tecnico_id));
   }, [formData.solic_tecnico_id, tecnicos]);
 
+  // Memoized function to generate liberation text that updates whenever formData or tecnicoAssociado changes
   const textoLiberacao = useMemo(() => {
     return `Prezados,
 
@@ -64,6 +92,7 @@ Nome: ${tecnicoAssociado?.tec_nome || 'N/A'}
 CPF: ${tecnicoAssociado?.tec_cpf || 'N/A'}`;
   }, [formData.solic_data_atividade, formData.solic_hora_atividade, tecnicoAssociado]);
 
+  // Memoized function to generate solicitation text that updates whenever formData changes
   const textoSolicitacao = useMemo(() => {
     return `Cliente: ${formData.solic_projeto || 'N/A'}
 Localidade: ${formData.solic_nome || 'N/A'}
@@ -81,6 +110,20 @@ Procurar por: ${formData.solic_contato_local || 'N/A'}
 Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
   }, [formData, tecnicoAssociado]);
 
+  // Mapeamento de valores antigos do banco para novos valores
+  const statusMapping: Record<string, string> = {
+    'Pendente': 'pendente',
+    'pendente': 'pendente',
+    'Em Progresso': 'agendado',
+    'em_progresso': 'agendado',
+    'atribuidas': 'agendado',
+    'atribuido': 'agendado',
+    'Concluido': 'concluido',
+    'concluido': 'concluido',
+    'Cancelado': 'improdutivo',
+    'cancelado': 'improdutivo',
+    'improdutivas': 'improdutivo',
+  };
   
   const faturamentoMapping: Record<string, string> = {
     'nao-pago': 'Não Pago',
@@ -98,7 +141,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       };
       setFormData(mappedSolicitacao);
     }
-  }, [solicitacao, statusMapping]);
+  }, [solicitacao]);
 
   const handleEditToggle = () => {
     if (isEditMode) {
@@ -107,6 +150,8 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       setIsEditMode(true);
     }
   };
+
+  const updateMutation = trpc.solicitacoes.update.useMutation();
 
   const handleSave = async () => {
     try {
@@ -137,6 +182,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       if (formData.solic_horario_liberacao) updatePayload.horarioLiberacao = formData.solic_horario_liberacao;
       if (formData.solic_horario_termino) updatePayload.horarioTermino = formData.solic_horario_termino;
       
+      // Calculate total hours if both arrival and departure times are set
       if (formData.solic_horario_chegada && formData.solic_horario_termino) {
         const [chegadaH, chegadaM] = (formData.solic_horario_chegada || '00:00').split(':').map(Number);
         const [terminoH, terminoM] = (formData.solic_horario_termino || '00:00').split(':').map(Number);
@@ -146,7 +192,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
           ? terminoMinutos - chegadaMinutos 
           : (24 * 60) - chegadaMinutos + terminoMinutos;
         const horas = Math.floor(diferencaMinutos / 60);
-        const minutos = String(diferencaMinutos % 60).padStart(2, '0');
+        const minutos = diferencaMinutos % 60;
         updatePayload.totalHoras = `${horas}h ${minutos}m`;
       }
       
@@ -176,85 +222,33 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
     setIsEditMode(false);
   };
 
-  const handleSelectTecnico = async (tecnico: any) => {
-  if (!pathId) {
-    toast.error('ID da solicitação não encontrado.');
-    return;
-  }
-
-  try {
-    toast.loading('Salvando técnico selecionado...');
-
-    const tecnicoIdStr = String(tecnico.id);
-
-    // 1. Atualiza estado local
-    setFormData((prev: any) => ({
-      ...prev,
-      solic_tecnico_id: tecnicoIdStr
-    }));
-
-    // 2. Dispara a atualização alinhada com o Zod schema de `solicitacoes.update`
-    await updateMutation.mutateAsync({
-      id: String(pathId),
-      tecnicoId: tecnicoIdStr,
-      tecnicoEscolhido: {
-        id: tecnicoIdStr,
-        nome: tecnico.tec_nome || tecnico.nome || 'Técnico Sem Nome',
-        telefone: tecnico.tec_telefone || tecnico.telefone || '',
-        cpf: tecnico.tec_cpf || tecnico.cpf || ''
-      }
+  const handleSelectTecnico = (tecnico: any) => {
+    setFormData({
+      ...formData,
+      solic_tecnico_id: tecnico.id
     });
-
-    toast.dismiss();
-    toast.success(`Técnico ${tecnico.tec_nome || ''} salvo com sucesso!`);
+    toast.success(`Técnico ${tecnico.tec_nome} selecionado!`);
     setShowTecnicoModal(false);
-  } catch (error: any) {
-    toast.dismiss();
-    toast.error('Erro ao salvar técnico no banco de dados');
-    console.error('Erro tRPC detalhado:', error);
-  }
-};
+  };
 
-const handleOpenTecnicoModal = async () => {
-  let lat = Number(formData.solic_latitude || formData.latitude || 0);
-  let lon = Number(formData.solic_longitude || formData.longitude || 0);
-
-  // Tenta buscar a coordenada via CEP primeiro se disponível
-  if (formData.solic_cep) {
-    try {
-      const cepLimpo = String(formData.solic_cep).replace(/\D/g, '');
-      if (cepLimpo.length === 8) {
-        const endereco = await buscarEnderecoPorCEP(cepLimpo);
-        if (endereco?.latitude && endereco?.longitude) {
-          lat = Number(endereco.latitude);
-          lon = Number(endereco.longitude);
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao buscar coordenadas via CEP:', error);
-    }
-  }
-
-  if (!lat || !lon) {
-    toast.error('Solicitação não possui coordenadas válidas para calcular a distância.');
-    return;
-  }
-
-  // Dispara a busca via hook isolado
-  searchTechnicians(tecnicos, { lat, lng: lon });
-  setShowTecnicoModal(true);
-};
+  const handleOpenTecnicoModal = async () => {
+    // Use coordinates from formData, or calculate from address if needed
+    const lat = parseFloat(formData.solic_latitude) || -23.5505;
+    const lon = parseFloat(formData.solic_longitude) || -46.6333;
+    setModalCoords({ latitude: lat, longitude: lon });
+    setShowTecnicoModal(true);
+  };
 
   const handleDelete = async () => {
-    if (!confirm('Tem certeza que deseja deletar esta solicitação?')) return;
+    if (!confirm('Tem certeza que deseja deletar esta solicitacao?')) return;
     try {
-      toast.loading('Deletando solicitação...');
+      toast.loading('Deletando solicitacao...');
       await deleteMutation.mutateAsync({ id: String(formData.id) });
-      toast.success('Solicitação deletada com sucesso!');
+      toast.success('Solicitacao deletada com sucesso!');
       setLocation('/solicitacoes');
     } catch (error) {
-      console.error('Erro ao deletar solicitação:', error);
-      toast.error('Erro ao deletar solicitação');
+      console.error('Erro ao deletar solicitacao:', error);
+      toast.error('Erro ao deletar solicitacao');
     }
   };
 
@@ -295,12 +289,10 @@ const handleOpenTecnicoModal = async () => {
           solic_bairro: enderecoConvertido.bairro,
           solic_cidade: enderecoConvertido.cidade,
           solic_uf: enderecoConvertido.uf,
-          solic_latitude: endereco.latitude || prev.solic_latitude,
-          solic_longitude: endereco.longitude || prev.solic_longitude,
         }));
-        toast.success('Endereço e coordenadas encontrados!');
+        toast.success('Endereco encontrado!');
       } else {
-        toast.error('CEP não encontrado');
+        toast.error('CEP nao encontrado');
       }
     } catch (error) {
       console.error('Erro ao buscar CEP:', error);
@@ -308,15 +300,7 @@ const handleOpenTecnicoModal = async () => {
     }
   };
 
-  const statusOptions = [
-  'Pendente',
-  'Em programação',
-  'Agendado',
-  'Concluído/Produtivo',
-  'Improdutivo',
-  'Cancelada',
-  'Aguardando Claro'
-];
+  const statusOptions = ['Pendente', 'Agendado', 'Concluído', 'Improdutivo'];
   const faturamentoOptions = ['Pago', 'Não Pago'];
 
   if (!solicitacao) {
@@ -328,7 +312,7 @@ const handleOpenTecnicoModal = async () => {
         </Card>
       </div>
     );
-  } 
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -384,6 +368,7 @@ const handleOpenTecnicoModal = async () => {
             </Button>
           </div>
         </div>
+
         {/* Main Content - Two Columns */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left Column - Solicitação Info */}
@@ -645,7 +630,7 @@ const handleOpenTecnicoModal = async () => {
               <div className="mb-4 border-t pt-4">
                 <label className="text-sm font-semibold text-muted-foreground">Status</label>
                 {isEditMode ? (
-                  <Select value={formData.solic_status || 'Pendente'} onValueChange={(value) => handleFieldChange('solic_status', value)}>
+                  <Select value={formData.solic_status || 'pendentes'} onValueChange={(value) => handleFieldChange('solic_status', value)}>
                     <SelectTrigger className="mt-1">
                       <SelectValue />
                     </SelectTrigger>
@@ -675,7 +660,7 @@ const handleOpenTecnicoModal = async () => {
                 )}
               </div>
 
-              {/* Faturamento */}
+              {/* Faturamento - Oculto para Analista */}
               {user?.role !== 'analista' && (
                 <div className="mb-4">
                   <label className="text-sm font-semibold text-muted-foreground">Faturamento</label>
@@ -756,7 +741,7 @@ const handleOpenTecnicoModal = async () => {
                             ? terminoMinutos - chegadaMinutos 
                             : (24 * 60) - chegadaMinutos + terminoMinutos;
                           const horas = Math.floor(diferencaMinutos / 60);
-                          const minutos = String(diferencaMinutos % 60).padStart(2, '0');
+                          const minutos = diferencaMinutos % 60;
                           return `${horas}h ${minutos}m`;
                         })()
                       : '-'
@@ -930,21 +915,21 @@ const handleOpenTecnicoModal = async () => {
           <DialogHeader>
             <DialogTitle className="text-green-600 flex items-center gap-2">
               <Send size={24} />
-              Liberação Enviada!
+              Liberacao Enviada!
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <p className="text-green-800 font-semibold mb-2">Informações do Envio:</p>
+              <p className="text-green-800 font-semibold mb-2">Informacoes do Envio:</p>
               <ul className="space-y-2 text-sm text-green-700">
                 <li><strong>Ticket:</strong> #{formData.solic_freshdesk}</li>
-                <li><strong>Técnico:</strong> {tecnicoAssociado?.tec_nome || 'N/A'}</li>
+                <li><strong>Tecnico:</strong> {tecnicoAssociado?.tec_nome || 'N/A'}</li>
                 <li><strong>Data:</strong> {formatDatePtBr(formData.solic_data_atividade)}</li>
                 <li><strong>Hora:</strong> {formatTimePtBr(formData.solic_hora_atividade)}</li>
               </ul>
             </div>
             <p className="text-gray-600 text-sm">
-              A liberação foi enviada com sucesso para o ticket Freshdesk.
+              A liberacao foi enviada com sucesso para o ticket Freshdesk.
             </p>
           </div>
           <div className="flex justify-end gap-2">
@@ -964,7 +949,7 @@ const handleOpenTecnicoModal = async () => {
         onClose={() => setShowTecnicoModal(false)}
         onSelectTechnician={handleSelectTecnico}
         technicians={nearbyTecnicos}
-        allTechnicians={tecnicos} // <-- Adicionado para busca global por nome
+        allTechnicians={tecnicos}
         isLoading={isLoadingTecnicos}
         currentTechnicianId={formData.solic_tecnico_id}
       />

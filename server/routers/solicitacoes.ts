@@ -119,7 +119,7 @@ export const solicitacoesRouter = router({
               solic_servico: input.servico,
               solic_operadora: input.operadora,
               solic_freshdesk: input.freshdeskTicket,
-              solic_contato_local: input.contatoLocal|| null,
+              solic_contato_local: input.contatoLocal || null,
               solic_cep: input.cep,
               solic_rua: input.rua,
               solic_numero: input.numero,
@@ -127,8 +127,8 @@ export const solicitacoesRouter = router({
               solic_bairro: input.bairro,
               solic_cidade: input.cidade,
               solic_uf: input.uf,
-              solic_data_atividade: input.dataAtividade|| null,
-              solic_hora_atividade: input.horaAtividade|| null,
+              solic_data_atividade: input.dataAtividade || null,
+              solic_hora_atividade: input.horaAtividade || null,
               solic_status: input.status || 'Pendente',
               solic_observacoes: input.observacoes,
               solic_tecnico_id: input.tecnicoId || null,
@@ -153,6 +153,79 @@ export const solicitacoesRouter = router({
           throw new Error(error.message);
         }
 
+        const novaSolicitacao = data?.[0];
+        const osId = novaSolicitacao?.id;
+
+        // Integração Automática com Freshdesk
+        if (input.freshdeskTicket && osId) {
+          const freshdeskTicketId = input.freshdeskTicket.replace('#', '').trim();
+          const FRESHDESK_DOMAIN = process.env.FRESHDESK_DOMAIN || 'gowifiassist.freshdesk.com';
+          const FRESHDESK_API_KEY = process.env.FRESHDESK_API_KEY;
+
+          if (FRESHDESK_API_KEY) {
+            const authHeader = `Basic ${Buffer.from(`${FRESHDESK_API_KEY}:X`).toString('base64')}`;
+            const linkOS = `https://gestaocampo-gowifi.sytes.net:8088/detalhes/${osId}`;
+            const usuarioCriador = ctx.user?.email || 'Sistema';
+            const enderecoExibicao = fullAddress || 'Endereço não informado';
+
+            try {
+              console.log(`[Freshdesk Integration] Atualizando ticket #${freshdeskTicketId}...`);
+
+              // 1️⃣ Atualiza status (9001), tipo de atendimento (Campo) e ID da OS no ticket
+              const updateTicketRes = await fetch(`https://${FRESHDESK_DOMAIN}/api/v2/tickets/${freshdeskTicketId}`, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': authHeader,
+                },
+                body: JSON.stringify({
+                  status: 9001,
+                  custom_fields: {
+                    cf_tipo_de_atendimento: 'Campo',
+                    cf_os_solicitacao_tecnico: Number(osId),
+                  },
+                }),
+              });
+
+              if (!updateTicketRes.ok) {
+                const errText = await updateTicketRes.text();
+                console.error(`[Freshdesk Integration] Erro ao atualizar ticket #${freshdeskTicketId}:`, errText);
+              }
+
+              // 2️⃣ Adiciona nota privada com o criador, link e endereço da OS
+              const noteContent = `
+                <p><b>OS de solicitação de técnico criada por:</b> ${usuarioCriador}</p>
+                <p><b>URL OS:</b> <a href="${linkOS}" target="_blank">${linkOS}</a></p>
+                <p><b>Endereço:</b> ${enderecoExibicao}</p>
+              `.trim();
+
+              const createNoteRes = await fetch(`https://${FRESHDESK_DOMAIN}/api/v2/tickets/${freshdeskTicketId}/notes`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': authHeader,
+                },
+                body: JSON.stringify({
+                  body: noteContent,
+                  private: true,
+                }),
+              });
+
+              if (!createNoteRes.ok) {
+                const errText = await createNoteRes.text();
+                console.error(`[Freshdesk Integration] Erro ao criar nota no ticket #${freshdeskTicketId}:`, errText);
+              } else {
+                console.log(`[Freshdesk Integration] Ticket #${freshdeskTicketId} e nota privada atualizados com sucesso.`);
+              }
+
+            } catch (fdError) {
+              console.error('[Freshdesk Integration] Falha ao comunicar com a API do Freshdesk:', fdError);
+            }
+          } else {
+            console.warn('[Freshdesk Integration] FRESHDESK_API_KEY não definida nas variáveis de ambiente.');
+          }
+        }
+
         // Log to audit
         await logAuditEvent({
           usuario: ctx.user?.email || 'unknown',
@@ -160,11 +233,11 @@ export const solicitacoesRouter = router({
           acao: 'create',
           descricao: `Solicitação criada: ${input.nomeAtividade}`,
           tipoDocumento: 'solicitacao',
-          idDocumento: data?.[0]?.id || 'unknown',
-          dadosDepois: data?.[0],
+          idDocumento: osId || 'unknown',
+          dadosDepois: novaSolicitacao,
         });
 
-        return data?.[0];
+        return novaSolicitacao;
       } catch (error) {
         console.error('Error in solicitacoes.create:', error);
         throw error;
@@ -246,7 +319,6 @@ export const solicitacoesRouter = router({
 
         // Apply filters
         if (input.status) {
-          // Use case-insensitive filter
           query = query.ilike('solic_status', input.status);
         }
 
@@ -291,7 +363,6 @@ export const solicitacoesRouter = router({
           query = query.gte('solic_data_conclusao', input.dataConclusaoStart);
         }
 
-        // Localize onde estão os outros filtros e adicione:
         if (input.servico) {
           query = query.ilike('solic_servico', input.servico);
         }
@@ -348,7 +419,6 @@ export const solicitacoesRouter = router({
           ascending = true;
         }
         
-        // Order by the selected field, then by ID with same direction as primary sort
         const { data, error } = await query
           .order(sortField, { ascending })
           .order('id', { ascending });
@@ -360,7 +430,6 @@ export const solicitacoesRouter = router({
 
         let filtered = data || [];
         
-        // Use the coordinated filter system
         const filterSummary = getFilterSummary(input);
         console.log(`[tRPC] solicitacoes.filter called with: ${filterSummary}, sortBy: ${input.sortBy || 'default'}`);
         
@@ -475,10 +544,8 @@ export const solicitacoesRouter = router({
         if (updateData.tecnicoId !== undefined) updatePayload.solic_tecnico_id = updateData.tecnicoId;
         if (updateData.tecnicoEscolhido !== undefined) updatePayload.solic_tecnico_id = updateData.tecnicoEscolhido.id;
 
-        // Always update solic_atualizado_por
         updatePayload.solic_atualizado_por = ctx.user?.email;
         
-        // Recalculate address and coordinates if any address field changed
         console.log('[tRPC] UPDATE input data:', { rua: updateData.rua, numero: updateData.numero, cep: updateData.cep, cidade: updateData.cidade, uf: updateData.uf });
         const addressFieldsChanged = updateData.rua !== undefined || updateData.numero !== undefined || 
                                      updateData.complemento !== undefined || updateData.bairro !== undefined || 
@@ -487,7 +554,6 @@ export const solicitacoesRouter = router({
         
         if (addressFieldsChanged) {
           console.log('[tRPC] Address fields changed, recalculating...');
-          // Get current values from database
           const { data: currentData } = await supabase
             .from('solicitacoes')
             .select('solic_rua, solic_numero, solic_complemento, solic_bairro, solic_cidade, solic_uf, solic_cep')
@@ -506,12 +572,10 @@ export const solicitacoesRouter = router({
             const uf = updateData.uf !== undefined ? updateData.uf : currentData.solic_uf;
             const cep = updateData.cep !== undefined ? updateData.cep : currentData.solic_cep;
             
-            // Build full address
             const fullAddress = buildFullAddress(rua, numero, complemento, bairro, cidade, uf, cep);
             console.log('[tRPC] Full address built:', fullAddress);
             updatePayload.solic_endereco = fullAddress;
             
-            // Geocode the address
             console.log('[tRPC] Checking geocoding conditions - rua:', rua, 'numero:', numero, 'cidade:', cidade, 'uf:', uf);
             if (rua && numero && cidade && uf) {
               console.log('[tRPC] Starting geocoding...');
@@ -526,7 +590,6 @@ export const solicitacoesRouter = router({
           }
         }
         
-        // Fetch technician data if tecnico_id changed
         const tecnicoChanged = updateData.tecnicoId !== undefined || updateData.tecnicoEscolhido !== undefined;
         if (tecnicoChanged) {
           const tecnicoId = updateData.tecnicoEscolhido?.id || updateData.tecnicoId;
@@ -546,7 +609,6 @@ export const solicitacoesRouter = router({
               updatePayload.solic_empresa_parceira = tecnicoData.tec_empresa_parceira || null;
             }
           } else {
-            // If tecnico_id is null, clear technician fields
             updatePayload.solic_tecnico_nome = null;
             updatePayload.solic_tecnico_telefone = null;
             updatePayload.solic_tecnico_cpf = null;
