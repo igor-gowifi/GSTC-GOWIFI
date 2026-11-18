@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Menu, X, BarChart3, Users, List, Plus, Search, LogOut, User, Terminal, Settings, Moon, Sun, Package } from 'lucide-react';
+import { Menu, X, BarChart3, Users, List, Plus, Search, LogOut, User, Terminal, Settings, Moon, Sun, Package, Wifi } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 
 interface NavigationProps {
@@ -39,6 +39,7 @@ export default function Navigation({
     { id: 'solicitacoes', label: 'Solicitações', icon: List, roles: ['adminmaster', 'admin', 'analista'] },
     { id: 'nova-solicitacao', label: 'Nova Solicitação', icon: Plus, roles: ['adminmaster', 'admin', 'analista'] },
     { id: 'consulta', label: 'Consulta', icon: Search, roles: ['adminmaster', 'admin'] },
+    { id: 'unifi', label: 'Provisionamento UniFi', icon: Wifi, roles: ['adminmaster', 'admin', 'analista'] }, // <--- Novo item adicionado
     { id: 'console', label: 'Console', icon: Terminal, roles: ['adminmaster'] },
     { id: 'historico-equipamentos', label: 'Histórico de Equipamentos', icon: Package, roles: ['adminmaster', 'admin'] },
     { id: 'usuarios', label: 'Usuários', icon: Settings, roles: ['adminmaster', 'admin'] },

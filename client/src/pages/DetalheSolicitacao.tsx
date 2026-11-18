@@ -13,45 +13,17 @@ import { formatDatePtBr, formatTimePtBr, formatDateTimePtBr } from '@/lib/dateFo
 import { Save, X, Trash2, Edit3, Copy, Send, ExternalLink } from 'lucide-react';
 import { useAuth } from '@/_core/hooks/useAuth';
 import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
+import { ResponsavelAgendamento, ResponsavelSolicitacao, useAssignmentAvailability } from '@/components/SolicitacaoAssigneeSelect';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { aplicarMascaraCEP } from '@/utils/masks';
+import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
 
-
-
-
-
-
-const GRUPOS_PROJETO = [
-  'WiFi Seguro',
-  'Projetos Especiais',
-  'Bradesco',
-  'Santander',
-  'PUC-Universidade',
-  'Hotelarias',
-  'Telemedicina',
-  'Escola Santa Maria',
-  'Viasat',
-  'Daiki Sushi',
-];
-
-const SERVICOS = [
-  'Desativação',
-  'Instalação',
-  'Suporte',
-  'Troca de Endereço',
-];
-
-const OPERADORAS = [
-  'Primesys',
-  'Claro Empresas',
-  'Hughes',
-  'Gowifi',
-  'PUC',
-  'Outro',
-];
 
 export default function DetalheSolicitacao() {
   const { user } = useAuth();
+  const assignmentAvailability = useAssignmentAvailability(!!user);
+  const canEditScheduling = Boolean(user && user.role !== 'analista');
+  const schedulingAvailability = useAssignmentAvailability(canEditScheduling, 'agendamento');
   const pathId = typeof window !== 'undefined' ? window.location.pathname.split('/').pop() : null;
   const [, setLocation] = useLocation();
   const [isEditMode, setIsEditMode] = useState(false);
@@ -60,6 +32,12 @@ export default function DetalheSolicitacao() {
   const [formData, setFormData] = useState<any>({});
   const [selectedTecnicoFromModal, setSelectedTecnicoFromModal] = useState<any>(null);
   const [modalCoords, setModalCoords] = useState({ latitude: 0, longitude: 0 });
+
+  const {
+  GRUPOS_PROJETO,
+  SERVICOS,
+  OPERADORAS
+} = useSolicitacaoOptions();
   
   const { data: solicitacoesData = [] } = trpc.solicitacoes.list.useQuery();
   const { data: tecnicos = [] } = trpc.tecnicos.list.useQuery();
@@ -433,6 +411,28 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
           <div className="space-y-4">
             <Card className="p-6">
               <h2 className="text-xl font-bold mb-4 text-blue-600">Informações da Solicitação</h2>
+
+              <div className="grid grid-cols-1 gap-4 mb-4 text-sm sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <p className="text-muted-foreground">Aberta por</p>
+                  <p className="mt-1 font-medium break-words">{solicitacao.creatorName || 'Não registrado'}</p>
+                </div>
+                <ResponsavelSolicitacao
+                  availability={assignmentAvailability}
+                  id={String(solicitacao.id)}
+                  assigneeId={solicitacao.assigneeId}
+                  assigneeName={solicitacao.assigneeName}
+                  disabled={isEditMode}
+                />
+                <ResponsavelAgendamento
+                  availability={schedulingAvailability}
+                  editable={canEditScheduling}
+                  id={String(solicitacao.id)}
+                  assigneeId={solicitacao.schedulerId}
+                  assigneeName={solicitacao.schedulerName}
+                  disabled={isEditMode}
+                />
+              </div>
               
               {/* Nome Atividade */}
               <div className="mb-4">

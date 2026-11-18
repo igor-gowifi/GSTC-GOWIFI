@@ -11,6 +11,7 @@ export const rolePermissions: Record<UserRole, string[]> = {
     'solicitacoes',
     'nova-solicitacao',
     'perfil',
+    'unifi',
   ],
   admin: [
     'dashboard',
@@ -22,6 +23,8 @@ export const rolePermissions: Record<UserRole, string[]> = {
     'usuarios',
     'historico-equipamentos',
     'perfil',
+    'unifi',
+
   ],
   adminmaster: [
     'dashboard',
@@ -33,6 +36,7 @@ export const rolePermissions: Record<UserRole, string[]> = {
     'usuarios',
     'historico-equipamentos',
     'perfil',
+    'unifi',
   ],
 };
 

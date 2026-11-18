@@ -8,12 +8,14 @@ import { Eye, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useFilters } from '@/hooks/useFilters';
 import { UnifiedFilterPanel } from '@/components/UnifiedFilterPanel';
+import { ResponsavelAgendamento, ResponsavelSolicitacao, useAssignmentAvailability } from '@/components/SolicitacaoAssigneeSelect';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { useLocation, Link } from 'wouter';
 import { formatDatePtBr, formatTimePtBr } from '@/lib/dateFormatter';
 import { useAuth } from '@/_core/hooks/useAuth';
 import Fuse from 'fuse.js';
+import { canFilterByAssignee, canFilterByScheduler } from '@shared/solicitacaoFilters';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -43,9 +45,51 @@ const isSolicitacaoAtrasada = (status?: string, dataAtividadeStr?: string | null
   return dataAtividade < hoje;
 };
 
+type ResponsibilityFilterProps = {
+  label: string;
+  value?: string;
+  options: { id: string; name: string }[];
+  loading: boolean;
+  error: boolean;
+  onChange: (value?: string) => void;
+};
+
+function ResponsibilityFilter({ label, value, options, loading, error, onChange }: ResponsibilityFilterProps) {
+  return (
+    <Select value={value ?? 'all'} onValueChange={next => onChange(next === 'all' ? undefined : next)}>
+      <SelectTrigger aria-label={label} className="h-9 w-full sm:w-auto sm:max-w-64">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">{label}</SelectItem>
+        {options.map(option => (
+          <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
+        ))}
+        {loading && <SelectItem value="loading" disabled>Carregando responsáveis…</SelectItem>}
+        {error && <SelectItem value="error" disabled>Não foi possível carregar os responsáveis</SelectItem>}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export default function Solicitacoes() {
   const { user } = useAuth();
+  const assignmentAvailability = useAssignmentAvailability(!!user);
+  const canEditScheduling = Boolean(user && user.role !== 'analista');
+  const schedulingAvailability = useAssignmentAvailability(canEditScheduling, 'agendamento');
   const [currentPage, setCurrentPage] = useState(1);
+  const showAssigneeFilter = canFilterByAssignee(user?.role);
+  const showSchedulerFilter = canFilterByScheduler(user?.role);
+  const [assigneeId, setAssigneeId] = useState<string>();
+  const [schedulerId, setSchedulerId] = useState<string>();
+  const assignees = trpc.solicitacoes.assignees.useQuery(undefined, {
+    enabled: showAssigneeFilter && assignmentAvailability === 'available',
+    staleTime: 60_000,
+  });
+  const schedulers = trpc.solicitacoes.schedulingAssignees.useQuery(undefined, {
+    enabled: showSchedulerFilter && schedulingAvailability === 'available',
+    staleTime: 60_000,
+  });
   const [sortBy, setSortBy] = useState<SortOption>('data-criacao-desc');
   const [, navigate] = useLocation();
   const { filters, updateFilter, getActiveFilterCount, getActiveFilters } = useFilters();
@@ -63,6 +107,8 @@ export default function Solicitacoes() {
   const { data: filteredSolicitacoes = [], isLoading } = trpc.solicitacoes.filter.useQuery(
     {
       searchTerm: '', // Empty search - we'll use Fuse.js on client
+      assigneeId: showAssigneeFilter && assignmentAvailability === 'available' ? assigneeId : undefined,
+      schedulerId: showSchedulerFilter && schedulingAvailability === 'available' ? schedulerId : undefined,
       status: filters.status || '',
       projeto: filters.projeto || '',
       servico: filters.servico || '',
@@ -266,64 +312,81 @@ export default function Solicitacoes() {
               </div>
             )}
 
+            {/* Search Field */}
+            <div>
+              <Input
+                  placeholder="Buscar por nome, ticket, status..."
+                value={filters.searchTerm || ''}
+                onChange={event => updateFilter('searchTerm', event.target.value)}
+                className="h-9 w-full"
+              />
+            </div>
+
+            {/* Results Info and Sorting */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-muted-foreground">
+                {sortedSolicitacoes.length > 0 ? (
+                  <>
+                    {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, sortedSolicitacoes.length)} de {sortedSolicitacoes.length}
+                  </>
+                ) : (
+                  isLoading ? '' : 'Nenhuma solicitação encontrada'
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {showAssigneeFilter && assignmentAvailability === 'available' && (
+                  <ResponsibilityFilter
+                    label="Responsável pela OS"
+                    value={assigneeId}
+                    options={assignees.data ?? []}
+                    loading={assignees.isPending}
+                    error={assignees.isError}
+                    onChange={value => {
+                      setAssigneeId(value);
+                      setCurrentPage(1);
+                    }}
+                  />
+                )}
+                {showSchedulerFilter && schedulingAvailability === 'available' && (
+                  <ResponsibilityFilter
+                    label="Responsável pelo agendamento"
+                    value={schedulerId}
+                    options={schedulers.data ?? []}
+                    loading={schedulers.isPending}
+                    error={schedulers.isError}
+                    onChange={value => {
+                      setSchedulerId(value);
+                      setCurrentPage(1);
+                    }}
+                  />
+                )}
+                <label className="text-sm font-medium text-foreground">Classificar por:</label>
+                <Select value={sortBy} onValueChange={(value) => {
+                  setSortBy(value as SortOption);
+                  setCurrentPage(1);
+                }}>
+                  <SelectTrigger className="w-48 h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="data-criacao-desc">Data de Criação (Recente)</SelectItem>
+                    <SelectItem value="data-criacao-asc">Data de Criação (Antigo)</SelectItem>
+                    <SelectItem value="data-atividade-desc">Data de Atividade (Recente)</SelectItem>
+                    <SelectItem value="data-atividade-asc">Data de Atividade (Antigo)</SelectItem>
+                    <SelectItem value="data-conclusao-desc">Data de Conclusão (Recente)</SelectItem>
+                    <SelectItem value="data-conclusao-asc">Data de Conclusão (Antigo)</SelectItem>
+                    <SelectItem value="status-asc">Status (A-Z)</SelectItem>
+                    <SelectItem value="status-desc">Status (Z-A)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
             {/* Loading State */}
             {isLoading && (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                 <span className="ml-2 text-muted-foreground">Carregando solicitações...</span>
-              </div>
-            )}
-
-            {/* Search Field */}
-            {!isLoading && (
-              <div>
-                <Input
-                  placeholder="Buscar por nome, ticket, status..."
-                  value={filters.searchTerm || ''}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                    const value = e.target.value;
-                    if (value.length === 0 || value.length >= 1) {
-                      updateFilter('searchTerm', value);
-                    }
-                  }}
-                  className="h-9 w-full"
-                />
-              </div>
-            )}
-
-            {/* Results Info and Sorting */}
-            {!isLoading && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div className="text-sm text-muted-foreground">
-                  {sortedSolicitacoes.length > 0 ? (
-                    <>
-                      {((currentPage - 1) * ITEMS_PER_PAGE) + 1} - {Math.min(currentPage * ITEMS_PER_PAGE, sortedSolicitacoes.length)} de {sortedSolicitacoes.length}
-                    </>
-                  ) : (
-                    'Nenhuma solicitação encontrada'
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-foreground">Classificar por:</label>
-                  <Select value={sortBy} onValueChange={(value) => {
-                    setSortBy(value as SortOption);
-                    setCurrentPage(1);
-                  }}>
-                    <SelectTrigger className="w-48 h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="data-criacao-desc">Data de Criação (Recente)</SelectItem>
-                      <SelectItem value="data-criacao-asc">Data de Criação (Antigo)</SelectItem>
-                      <SelectItem value="data-atividade-desc">Data de Atividade (Recente)</SelectItem>
-                      <SelectItem value="data-atividade-asc">Data de Atividade (Antigo)</SelectItem>
-                      <SelectItem value="data-conclusao-desc">Data de Conclusão (Recente)</SelectItem>
-                      <SelectItem value="data-conclusao-asc">Data de Conclusão (Antigo)</SelectItem>
-                      <SelectItem value="status-asc">Status (A-Z)</SelectItem>
-                      <SelectItem value="status-desc">Status (Z-A)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
             )}
 
@@ -398,6 +461,23 @@ export default function Solicitacoes() {
                             <p className="text-muted-foreground">Data Conclusão</p>
                             <p className="font-medium">{formatDatePtBr(sol.solic_data_conclusao)}</p>
                           </div>
+                          <div>
+                            <p className="text-muted-foreground">Aberta por</p>
+                            <p className="font-medium break-words">{sol.creatorName || 'Não registrado'}</p>
+                          </div>
+                          <ResponsavelSolicitacao
+                            availability={assignmentAvailability}
+                            id={String(sol.id)}
+                            assigneeId={sol.assigneeId}
+                            assigneeName={sol.assigneeName}
+                          />
+                          <ResponsavelAgendamento
+                            availability={schedulingAvailability}
+                            editable={canEditScheduling}
+                            id={String(sol.id)}
+                            assigneeId={sol.schedulerId}
+                            assigneeName={sol.schedulerName}
+                          />
                           {user?.role !== 'analista' && (
                             <div>
                               <p className="text-muted-foreground">Faturamento</p>

@@ -24,6 +24,7 @@ import Perfil from '@/pages/Perfil';
 import Navigation from '@/components/Navigation';
 import { canAccessPage } from '@/utils/rolePermissions';
 import { useInactivityLogout } from '@/_core/hooks/useInactivityLogout';
+import { ConfiguracaoAP } from '@/pages/unifi/ConfiguracaoAP';
 
 
 export default function App() {
@@ -57,20 +58,22 @@ export default function App() {
   const [matchLogin] = useRoute('/login');
   const [matchForgotPassword] = useRoute('/forgot-password');
   const [matchResetPassword] = useRoute('/reset-password');
+  const [matchUnifi] = useRoute('/unifi');
 
   // Determine active section from URL
   const getActiveSection = () => {
-    if (matchDashboard || matchDashboardPath) return 'dashboard';
-    if (matchTecnicos || matchDetalheTecnico) return 'tecnicos';
-    if (matchSolicitacoes || matchDetalheSolicitacao) return 'solicitacoes';
-    if (matchNovaSolicitacao) return 'nova-solicitacao';
-    if (matchConsulta) return 'consulta';
-    if (matchConsole) return 'console';
-    if (matchUsuarios) return 'usuarios';
-    if (matchHistoricoEquipamentos) return 'historico-equipamentos';
-    if (matchPerfil) return 'perfil';
-    return 'dashboard';
-  };
+  if (matchDashboard || matchDashboardPath) return 'dashboard';
+  if (matchTecnicos || matchDetalheTecnico) return 'tecnicos';
+  if (matchSolicitacoes || matchDetalheSolicitacao) return 'solicitacoes';
+  if (matchNovaSolicitacao) return 'nova-solicitacao';
+  if (matchConsulta) return 'consulta';
+  if (matchConsole) return 'console';
+  if (matchUsuarios) return 'usuarios';
+  if (matchHistoricoEquipamentos) return 'historico-equipamentos';
+  if (matchPerfil) return 'perfil';
+  if (matchUnifi) return 'unifi'; // <--- Adicionar aqui
+  return 'dashboard';
+};
 
   const activeSection = getActiveSection();
   const detalheSolicitacaoId = matchDetalheSolicitacao ? params?.id : null;
@@ -229,6 +232,8 @@ export default function App() {
         break;
       case 'perfil':
         setLocation('/perfil');
+      case 'unifi':
+  setLocation('/unifi');
         break;
       default:
         setLocation('/');
@@ -354,6 +359,7 @@ export default function App() {
                 {matchHistoricoEquipamentos && !matchDetalheEquipamento && <HistoricoEquipamentos />}
                 {matchDetalheEquipamento && <DetalheEquipamento />}
                 {matchPerfil && <Perfil />}
+                {matchUnifi && <ConfiguracaoAP />}
               </>
             )}
           </main>

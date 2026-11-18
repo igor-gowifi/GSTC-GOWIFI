@@ -2,8 +2,8 @@ import { ENV } from './_core/env';
 
 /**
  * Send a reply to a Freshdesk ticket
- * @param ticketId - The Freshdesk ticket ID
- * @param message - The message body (can be HTML or plain text)
+ * @param ticketId The Freshdesk ticket ID
+ * @param message The message body (can be HTML or plain text)
  * @returns The response from Freshdesk API
  */
 export async function responderTicketFreshdesk(ticketId: number, message: string) {
@@ -29,15 +29,47 @@ export async function responderTicketFreshdesk(ticketId: number, message: string
     throw new Error('FRESHDESK_DOMAIN nao configurada');
   }
 
-  const url = `https://${domain}.freshdesk.com/api/v2/tickets/${ticketId}/reply`;
-  console.log('[Freshdesk] URL:', url);
-
   // Freshdesk exige autenticação Basic com "api_key:X"
   const authHeader = Buffer.from(`${apiKey}:X`).toString('base64');
 
-  const payload = {
+  // 1. Buscar detalhes do ticket para coletar os e-mails em cópia (cc_emails)
+  let ccEmails: string[] = [];
+  try {
+    const ticketUrl = `https://${domain}.freshdesk.com/api/v2/tickets/${ticketId}`;
+    console.log('[Freshdesk] Buscando dados do ticket para recuperar CCs:', ticketUrl);
+    
+    const ticketResponse = await fetch(ticketUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (ticketResponse.ok) {
+      const ticketData = await ticketResponse.json();
+      if (ticketData.cc_emails && Array.isArray(ticketData.cc_emails)) {
+        ccEmails = ticketData.cc_emails;
+        console.log('[Freshdesk] CCs encontrados no ticket:', ccEmails);
+      }
+    } else {
+      console.warn('[Freshdesk] Não foi possível buscar os dados do ticket para recuperar CCs:', ticketResponse.status);
+    }
+  } catch (err) {
+    console.error('[Freshdesk] Erro ao buscar CCs do ticket:', err);
+  }
+
+  const url = `https://${domain}.freshdesk.com/api/v2/tickets/${ticketId}/reply`;
+  console.log('[Freshdesk] URL de resposta:', url);
+
+  // Monta o payload incluindo os CCs caso existam
+  const payload: any = {
     body: message,
   };
+
+  if (ccEmails.length > 0) {
+    payload.cc_emails = ccEmails;
+  }
 
   try {
     const response = await fetch(url, {
@@ -52,11 +84,11 @@ export async function responderTicketFreshdesk(ticketId: number, message: string
     if (!response.ok) {
       const errorData = await response.json();
       console.error('Erro ao responder ticket Freshdesk:', errorData);
-      throw new Error(`Erro Freshdesk: ${response.status} - ${JSON.stringify(errorData)}`);
+      throw new Error(`Erro Freshdesk: ${response.status} ${JSON.stringify(errorData)}`);
     }
 
     const data = await response.json();
-    console.log(`✅ Resposta enviada ao ticket #${ticketId}`);
+    console.log(`✅ Resposta enviada ao ticket #${ticketId} incluindo solicitante e cópias (CC)`);
     return data;
   } catch (err) {
     console.error('Erro na requisição Freshdesk:', err);

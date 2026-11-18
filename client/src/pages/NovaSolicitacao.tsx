@@ -12,11 +12,15 @@ import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup
 import { geocodeAddress } from '@/utils/geocodeAddress';
 import { aplicarMascaraCEP } from '@/utils/masks';
 import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
+import { SolicitacaoAssigneeSelect, useAssignmentAvailability } from '@/components/SolicitacaoAssigneeSelect';
 import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
 
 
 export default function NovaSolicitacao() {
   const { user } = useAuth();
+  const assignmentAvailability = useAssignmentAvailability(!!user);
+  const canEditScheduling = Boolean(user && user.role !== 'analista');
+  const schedulingAvailability = useAssignmentAvailability(canEditScheduling, 'agendamento');
   const [, setLocation] = useLocation();
   const {
   GRUPOS_PROJETO,
@@ -47,6 +51,8 @@ export default function NovaSolicitacao() {
   const [buscandoCEP, setBuscandoCEP] = useState(false);
   const [salvando, setSalvando] = useState(false);
   const [errosValidacao, setErrosValidacao] = useState<string[]>([]);
+  const [assigneeId, setAssigneeId] = useState<string | null>(null);
+  const [schedulerId, setSchedulerId] = useState<string | null>(null);
 
   // 3. Estados do Modal e Técnico Selecionado
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -184,6 +190,8 @@ export default function NovaSolicitacao() {
         cidade: formData.cidade,
         uf: formData.uf,
         tecnicoId: tecnicoSelecionado?.id || null,
+        assigneeId,
+        schedulerId: canEditScheduling ? schedulerId : undefined,
       });
 
       toast.success('Solicitação criada com sucesso!');
@@ -209,6 +217,7 @@ export default function NovaSolicitacao() {
         uf: '',
       });
       setTecnicoSelecionado(null);
+      setAssigneeId(null);
       setErrosValidacao([]);
     } catch (error) {
       console.error('Erro ao salvar solicitação:', error);
@@ -314,6 +323,27 @@ export default function NovaSolicitacao() {
                   className={errosValidacao.includes('Freshdesk Ticket') ? 'border-red-500' : ''}
                 />
               </div>
+
+              <div className="text-sm">
+                <SolicitacaoAssigneeSelect
+                  availability={assignmentAvailability}
+                  value={assigneeId}
+                  onChange={setAssigneeId}
+                  disabled={salvando}
+                />
+              </div>
+
+              {canEditScheduling && (
+                <div className="text-sm">
+                  <SolicitacaoAssigneeSelect
+                    availability={schedulingAvailability}
+                    role="agendamento"
+                    value={schedulerId}
+                    onChange={setSchedulerId}
+                    disabled={salvando}
+                  />
+                </div>
+              )}
 
               {/* 6. Contato Local */}
               <div>

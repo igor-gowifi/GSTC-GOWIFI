@@ -1,4 +1,7 @@
+import { canFilterByAssignee, canFilterByScheduler } from '../../shared/solicitacaoFilters';
 import { router, protectedProcedure, publicProcedure } from '../_core/trpc';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
+import { TRPCError } from '@trpc/server';
 import { z } from "zod";
 import { logAuditEvent } from "../auditHelper";
 import { buildFullAddress } from "../geocodingHelper";
@@ -6,8 +9,254 @@ import { geocodeAddressWithRetry } from "../geocodingWithRetry";
 import { getWeekRange, isDateInWeekRange } from "../weekHelper";
 import { getDateFieldFromSortBy, isDateInDay, isDateInMonth, isDateInYear } from "../filterHelper";
 import { applyCoordinatedFilters, getFilterSummary } from "../filterCoordinator";
+import { createSupabaseServerClient, getSupabaseUserName } from "../supabaseUsers";
+
+const assigneeInput = z.union([z.literal('me'), z.uuid()]).nullable();
+const schedulerInput = z.uuid().nullable();
+const schedulingNames = new Map([
+  ['vinicius.bevilaqua@gowifi.com.br', 'Vinicius Bevilaqua'],
+  ['okidathe.cocamaro@gowifi.com.br', 'Okidathe Cocamaro'],
+]);
+const previousSchedulingNames = new Map([
+  ['Vinicius Bevilacqua', 'Vinicius Bevilaqua'],
+  ['Okidathe', 'Okidathe Cocamaro'],
+]);
+const responsibilityColumns = [
+  'solic_criado_por_nome',
+  'solic_atribuido_a',
+  'solic_atribuido_a_nome',
+] as const;
+const schedulingColumns = ['solic_agendamento_responsavel_id', 'solic_agendamento_responsavel_nome'] as const;
+const assignmentUnavailableMessage = 'A atribuição ficará disponível após a atualização do banco de dados.';
+
+function isMissingColumn(error: { code: string; message: string }, columns: readonly string[]) {
+  return (error.code === '42703' || error.code === 'PGRST204') &&
+    columns.some(column => error.message.includes(column));
+}
+
+type ResponsibilityColumns = {
+  solic_criado_por?: string | null;
+  solic_criado_por_nome?: string | null;
+  solic_atribuido_a?: string | null;
+  solic_atribuido_a_nome?: string | null;
+  solic_agendamento_responsavel_id?: string | null;
+  solic_agendamento_responsavel_nome?: string | null;
+};
+
+function withResponsibility<T extends ResponsibilityColumns>(row: T) {
+  const schedulerName = row.solic_agendamento_responsavel_id && row.solic_agendamento_responsavel_nome;
+  return {
+    ...row,
+    creatorName: row.solic_criado_por_nome || row.solic_criado_por || null,
+    assigneeId: row.solic_atribuido_a || null,
+    assigneeName: row.solic_atribuido_a ? row.solic_atribuido_a_nome || null : null,
+    schedulerId: row.solic_agendamento_responsavel_id || null,
+    schedulerName: schedulerName ? previousSchedulingNames.get(schedulerName) ?? schedulerName : null,
+  };
+}
+
+function canAssignToUser(user: SupabaseUser) {
+  return Boolean(user.email && user.email_confirmed_at && !user.is_anonymous &&
+    (!user.banned_until || Date.parse(user.banned_until) <= Date.now()));
+}
+
+function isSchedulingUser(user: SupabaseUser) {
+  return canAssignToUser(user) && schedulingNames.has(user.email!.trim().toLowerCase());
+}
+
+function getSchedulingName(user: SupabaseUser) {
+  return schedulingNames.get(user.email?.trim().toLowerCase() ?? '') ?? getSupabaseUserName(user);
+}
+
+function requireSchedulingEditor(role: string) {
+  if (!role || role === 'analista') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'O perfil Analista pode apenas visualizar o responsável pelo agendamento.',
+    });
+  }
+}
+
+async function getAssignmentUser(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  userId: string,
+  eligible: (user: SupabaseUser) => boolean,
+) {
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error && error.status !== 404) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível validar o usuário responsável.',
+      cause: error,
+    });
+  }
+  if (!data?.user || !eligible(data.user)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Este usuário não está disponível para atribuição.',
+    });
+  }
+
+  return data.user;
+}
+
+async function resolveAssignee(
+  supabase: ReturnType<typeof createSupabaseServerClient>,
+  assignee: z.infer<typeof assigneeInput>,
+  currentUserId: string,
+) {
+  const user = assignee === null ? null : await getAssignmentUser(
+    supabase, assignee === 'me' ? currentUserId : assignee, canAssignToUser
+  );
+  return {
+    solic_atribuido_a: user?.id ?? null,
+    solic_atribuido_a_nome: user ? getSupabaseUserName(user) : null,
+  };
+}
+
+async function resolveScheduler(supabase: ReturnType<typeof createSupabaseServerClient>, schedulerId: string | null) {
+  const user = schedulerId === null ? null : await getAssignmentUser(supabase, schedulerId, isSchedulingUser);
+  return {
+    solic_agendamento_responsavel_id: user?.id ?? null,
+    solic_agendamento_responsavel_nome: user ? getSchedulingName(user) : null,
+  };
+}
+
+async function areAssignmentColumnsAvailable(columns: readonly string[]) {
+  const supabase = createSupabaseServerClient();
+  const { error } = await supabase.from('solicitacoes').select(columns.join(',')).limit(0);
+
+  if (error && !isMissingColumn(error, columns)) {
+    throw new TRPCError({
+      code: 'INTERNAL_SERVER_ERROR',
+      message: 'Não foi possível consultar a disponibilidade da atribuição.',
+      cause: error,
+    });
+  }
+  return !error;
+}
+
+async function listAssignmentUsers(
+  eligible: (user: SupabaseUser) => boolean,
+  getName = getSupabaseUserName,
+) {
+  const supabase = createSupabaseServerClient();
+  const users: { id: string; name: string }[] = [];
+  let page: number | null = 1;
+
+  while (page !== null) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Não foi possível carregar os usuários para atribuição.',
+        cause: error,
+      });
+    }
+    users.push(...data.users.filter(eligible).map(user => ({
+      id: user.id,
+      name: getName(user),
+    })));
+    page = data.nextPage ?? null;
+  }
+
+  return users.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+}
 
 export const solicitacoesRouter = router({
+  assignmentAvailable: protectedProcedure.query(() => areAssignmentColumnsAvailable(responsibilityColumns)),
+  schedulingAssignmentAvailable: protectedProcedure.query(() => areAssignmentColumnsAvailable(schedulingColumns)),
+  assignees: protectedProcedure.query(() => listAssignmentUsers(canAssignToUser)),
+  schedulingAssignees: protectedProcedure.query(({ ctx }) => {
+    requireSchedulingEditor(ctx.user.role);
+    return listAssignmentUsers(isSchedulingUser, getSchedulingName);
+  }),
+
+  assign: protectedProcedure
+    .input(z.object({ id: z.string(), assigneeId: assigneeInput }))
+    .mutation(async ({ ctx, input }) => {
+      const supabase = createSupabaseServerClient();
+      const assignment = await resolveAssignee(supabase, input.assigneeId, ctx.user.openId);
+      const { data, error } = await supabase
+        .from('solicitacoes')
+        .update({ ...assignment, solic_atualizado_por: ctx.user.email })
+        .eq('id', input.id)
+        .eq('solic_ativo', true)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        if (isMissingColumn(error, responsibilityColumns)) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: assignmentUnavailableMessage });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Não foi possível salvar o responsável pela OS.',
+          cause: error,
+        });
+      }
+      if (!data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'OS não encontrada.' });
+      }
+
+      await logAuditEvent({
+        usuario: ctx.user.email || 'unknown',
+        usuarioNome: ctx.user.name,
+        acao: 'update',
+        descricao: assignment.solic_atribuido_a_nome
+          ? `OS atribuída a ${assignment.solic_atribuido_a_nome}`
+          : 'Atribuição da OS removida',
+        tipoDocumento: 'solicitacao',
+        idDocumento: input.id,
+        dadosDepois: assignment,
+      });
+
+      return withResponsibility(data);
+    }),
+
+  assignScheduler: protectedProcedure
+    .input(z.object({ id: z.string(), schedulerId: schedulerInput }))
+    .mutation(async ({ ctx, input }) => {
+      requireSchedulingEditor(ctx.user.role);
+      const supabase = createSupabaseServerClient();
+      const assignment = await resolveScheduler(supabase, input.schedulerId);
+      const { data, error } = await supabase
+        .from('solicitacoes')
+        .update({ ...assignment, solic_atualizado_por: ctx.user.email })
+        .eq('id', input.id)
+        .eq('solic_ativo', true)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        if (isMissingColumn(error, schedulingColumns)) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: assignmentUnavailableMessage });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Não foi possível salvar o responsável pelo agendamento.',
+          cause: error,
+        });
+      }
+      if (!data) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'OS não encontrada.' });
+      }
+
+      await logAuditEvent({
+        usuario: ctx.user.email || 'unknown',
+        usuarioNome: ctx.user.name,
+        acao: 'update',
+        descricao: assignment.solic_agendamento_responsavel_nome
+          ? `Agendamento da OS atribuído a ${assignment.solic_agendamento_responsavel_nome}`
+          : 'Responsável pelo agendamento da OS removido',
+        tipoDocumento: 'solicitacao',
+        idDocumento: input.id,
+        dadosDepois: assignment,
+      });
+
+      return withResponsibility(data);
+    }),
+
   create: protectedProcedure
     .input(
       z.object({
@@ -29,10 +278,17 @@ export const solicitacoesRouter = router({
         status: z.string().optional(),
         observacoes: z.string().optional(),
         tecnicoId: z.string().nullable().optional(),
+        assigneeId: assigneeInput.optional(),
+        schedulerId: schedulerInput.optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
+      if (input.schedulerId) requireSchedulingEditor(ctx.user.role);
+
       try {
+        const supabase = createSupabaseServerClient();
+        const assignment = await resolveAssignee(supabase, input.assigneeId ?? null, ctx.user.openId);
+        const scheduling = input.schedulerId ? await resolveScheduler(supabase, input.schedulerId) : {};
         console.log('[tRPC] solicitacoes.create called with:', { nomeAtividade: input.nomeAtividade, cidade: input.cidade, usuario: ctx.user?.email });
         console.log('[tRPC] Address fields:', { rua: input.rua, numero: input.numero, cidade: input.cidade, uf: input.uf });
         
@@ -102,49 +358,56 @@ export const solicitacoesRouter = router({
         }
 
         // Create solicitacao in Supabase
-        const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(
-          process.env.SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
-
         console.log('[tRPC] Preparing insert with:', { fullAddress, latitude, longitude, tecnicoNome, tecnicoTelefone });
 
-        const { data, error } = await supabase
-          .from('solicitacoes')
-          .insert([
-            {
-              solic_nome: input.nomeAtividade,
-              solic_projeto: input.grupoProjeto,
-              solic_servico: input.servico,
-              solic_operadora: input.operadora,
-              solic_freshdesk: input.freshdeskTicket,
-              solic_contato_local: input.contatoLocal || null,
-              solic_cep: input.cep,
-              solic_rua: input.rua,
-              solic_numero: input.numero,
-              solic_complemento: input.complemento,
-              solic_bairro: input.bairro,
-              solic_cidade: input.cidade,
-              solic_uf: input.uf,
-              solic_data_atividade: input.dataAtividade || null,
-              solic_hora_atividade: input.horaAtividade || null,
-              solic_status: input.status || 'Pendente',
-              solic_observacoes: input.observacoes,
-              solic_tecnico_id: input.tecnicoId || null,
-              solic_data_criacao: new Date().toISOString(),
-              solic_criado_por: ctx.user?.email,
-              solic_atualizado_por: ctx.user?.email,
-              solic_endereco: fullAddress,
-              solic_latitude: latitude,
-              solic_longitude: longitude,
-              solic_tecnico_nome: tecnicoNome,
-              solic_tecnico_telefone: tecnicoTelefone,
-              solic_tecnico_cpf: tecnicoCpf,
-              solic_empresa_parceira: empresaParceira,
-            },
-          ])
-          .select();
+        const row = {
+          ...scheduling,
+          solic_nome: input.nomeAtividade,
+          solic_projeto: input.grupoProjeto,
+          solic_servico: input.servico,
+          solic_operadora: input.operadora,
+          solic_freshdesk: input.freshdeskTicket,
+          solic_contato_local: input.contatoLocal || null,
+          solic_cep: input.cep,
+          solic_rua: input.rua,
+          solic_numero: input.numero,
+          solic_complemento: input.complemento,
+          solic_bairro: input.bairro,
+          solic_cidade: input.cidade,
+          solic_uf: input.uf,
+          solic_data_atividade: input.dataAtividade || null,
+          solic_hora_atividade: input.horaAtividade || null,
+          solic_status: input.status || 'Pendente',
+          solic_observacoes: input.observacoes,
+          solic_tecnico_id: input.tecnicoId || null,
+          solic_data_criacao: new Date().toISOString(),
+          solic_criado_por: ctx.user?.email,
+          solic_atualizado_por: ctx.user?.email,
+          solic_endereco: fullAddress,
+          solic_latitude: latitude,
+          solic_longitude: longitude,
+          solic_tecnico_nome: tecnicoNome,
+          solic_tecnico_telefone: tecnicoTelefone,
+          solic_tecnico_cpf: tecnicoCpf,
+          solic_empresa_parceira: empresaParceira,
+        };
+        let result = await supabase.from('solicitacoes').insert([{
+          ...row,
+          solic_criado_por_nome: ctx.user.name || ctx.user.email,
+          ...assignment,
+        }]).select();
+
+        if (result.error && isMissingColumn(result.error, responsibilityColumns)) {
+          if (input.assigneeId) {
+            throw new TRPCError({ code: 'PRECONDITION_FAILED', message: assignmentUnavailableMessage });
+          }
+          // An unknown column rejects the whole insert, so retrying with the old schema is safe.
+          result = await supabase.from('solicitacoes').insert([row]).select();
+        }
+        const { data, error } = result;
+        if (error && isMissingColumn(error, schedulingColumns)) {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: assignmentUnavailableMessage });
+        }
 
         console.log('[tRPC] Insert result - data:', data?.[0], 'error:', error);
         
@@ -237,7 +500,7 @@ export const solicitacoesRouter = router({
           dadosDepois: novaSolicitacao,
         });
 
-        return novaSolicitacao;
+        return novaSolicitacao ? withResponsibility(novaSolicitacao) : novaSolicitacao;
       } catch (error) {
         console.error('Error in solicitacoes.create:', error);
         throw error;
@@ -267,7 +530,7 @@ export const solicitacoesRouter = router({
 
       // Transform data to flatten technician info
       const transformedData = (data || []).map((sol: any) => ({
-        ...sol,
+        ...withResponsibility(sol),
         solic_tecnico_nome: sol.tecnicos?.tec_nome || '',
         solic_tecnico_cpf: sol.tecnicos?.tec_cpf || '',
         solic_tecnico_telefone: sol.tecnicos?.tec_telefone || '',
@@ -286,6 +549,8 @@ export const solicitacoesRouter = router({
     .input(
       z.object({
         searchTerm: z.string().optional(),
+        assigneeId: z.uuid().optional(),
+        schedulerId: z.uuid().optional(),
         status: z.string().optional(),
         projeto: z.string().optional(),
         servico: z.string().optional(),
@@ -304,6 +569,11 @@ export const solicitacoesRouter = router({
       })
     )
     .query(async ({ input, ctx }) => {
+      if ((input.assigneeId && !canFilterByAssignee(ctx.user.role)) ||
+          (input.schedulerId && !canFilterByScheduler(ctx.user.role))) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Este filtro não está disponível para o seu perfil.' });
+      }
+
       try {
         console.log('[tRPC] solicitacoes.filter called with:', input);
         const { createClient } = await import('@supabase/supabase-js');
@@ -316,6 +586,14 @@ export const solicitacoesRouter = router({
         
         // Filter out inactive solicitacoes
         query = query.eq('solic_ativo', true);
+
+        if (input.assigneeId) {
+          query = query.eq('solic_atribuido_a', input.assigneeId);
+        }
+
+        if (input.schedulerId) {
+          query = query.eq('solic_agendamento_responsavel_id', input.schedulerId);
+        }
 
         // Apply filters
         if (input.status) {
@@ -419,9 +697,8 @@ export const solicitacoesRouter = router({
           ascending = true;
         }
         
-        const { data, error } = await query
-          .order(sortField, { ascending })
-          .order('id', { ascending });
+        query = query.order(sortField, { ascending }).order('id', { ascending });
+        const { data, error } = await query;
 
         if (error) {
           console.error('Error filtering solicitacoes:', error);
@@ -429,6 +706,17 @@ export const solicitacoesRouter = router({
         }
 
         let filtered = data || [];
+        if ((input.assigneeId || input.schedulerId) && filtered.length > 0) {
+          // Supabase pode limitar o número de registros por resposta.
+          let offset = filtered.length;
+          while (true) {
+            const { data: page, error: pageError } = await query.range(offset, offset + 999);
+            if (pageError) throw new Error(pageError.message);
+            if (!page?.length) break;
+            filtered.push(...page);
+            offset += page.length;
+          }
+        }
         
         const filterSummary = getFilterSummary(input);
         console.log(`[tRPC] solicitacoes.filter called with: ${filterSummary}, sortBy: ${input.sortBy || 'default'}`);
@@ -436,7 +724,7 @@ export const solicitacoesRouter = router({
         filtered = applyCoordinatedFilters(filtered, input);
         
         console.log(`[tRPC] solicitacoes.filter returned: ${filtered.length} solicitacoes (${filterSummary})`);
-        return filtered;
+        return filtered.map(withResponsibility);
       } catch (error) {
         console.error('Error in solicitacoes.filter:', error);
         throw error;
@@ -464,7 +752,7 @@ export const solicitacoesRouter = router({
           throw new Error(error.message);
         }
 
-        return data;
+        return withResponsibility(data);
       } catch (error) {
         console.error('Error in solicitacoes.getById:', error);
         throw error;
