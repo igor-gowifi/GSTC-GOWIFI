@@ -360,6 +360,7 @@ export const solicitacoesRouter = router({
         // Create solicitacao in Supabase
         console.log('[tRPC] Preparing insert with:', { fullAddress, latitude, longitude, tecnicoNome, tecnicoTelefone });
 
+<<<<<<< HEAD
         const row = {
           ...scheduling,
           solic_nome: input.nomeAtividade,
@@ -408,6 +409,43 @@ export const solicitacoesRouter = router({
         if (error && isMissingColumn(error, schedulingColumns)) {
           throw new TRPCError({ code: 'PRECONDITION_FAILED', message: assignmentUnavailableMessage });
         }
+=======
+        const { data, error } = await supabase
+          .from('solicitacoes')
+          .insert([
+            {
+              solic_nome: input.nomeAtividade,
+              solic_projeto: input.grupoProjeto,
+              solic_servico: input.servico,
+              solic_operadora: input.operadora,
+              solic_freshdesk: input.freshdeskTicket,
+              solic_contato_local: input.contatoLocal || null,
+              solic_cep: input.cep,
+              solic_rua: input.rua,
+              solic_numero: input.numero,
+              solic_complemento: input.complemento,
+              solic_bairro: input.bairro,
+              solic_cidade: input.cidade,
+              solic_uf: input.uf,
+              solic_data_atividade: input.dataAtividade || null,
+              solic_hora_atividade: input.horaAtividade || null,
+              solic_status: input.status || 'Pendente',
+              solic_observacoes: input.observacoes,
+              solic_tecnico_id: input.tecnicoId || null,
+              solic_data_criacao: new Date().toISOString(),
+              solic_criado_por: ctx.user?.email,
+              solic_atualizado_por: ctx.user?.email,
+              solic_endereco: fullAddress,
+              solic_latitude: latitude,
+              solic_longitude: longitude,
+              solic_tecnico_nome: tecnicoNome,
+              solic_tecnico_telefone: tecnicoTelefone,
+              solic_tecnico_cpf: tecnicoCpf,
+              solic_empresa_parceira: empresaParceira,
+            },
+          ])
+          .select();
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 
         console.log('[tRPC] Insert result - data:', data?.[0], 'error:', error);
         
@@ -445,7 +483,11 @@ export const solicitacoesRouter = router({
                   status: 9001,
                   custom_fields: {
                     cf_tipo_de_atendimento: 'Campo',
+<<<<<<< HEAD
                     cf_os_solicitacao_tecnico: parseInt(String(osId), 10),
+=======
+                    cf_os_solicitacao_tecnico: Number(osId),
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
                   },
                 }),
               });
@@ -500,7 +542,11 @@ export const solicitacoesRouter = router({
           dadosDepois: novaSolicitacao,
         });
 
+<<<<<<< HEAD
         return novaSolicitacao ? withResponsibility(novaSolicitacao) : novaSolicitacao;
+=======
+        return novaSolicitacao;
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
       } catch (error) {
         console.error('Error in solicitacoes.create:', error);
         throw error;
@@ -697,8 +743,14 @@ export const solicitacoesRouter = router({
           ascending = true;
         }
         
+<<<<<<< HEAD
         query = query.order(sortField, { ascending }).order('id', { ascending });
         const { data, error } = await query;
+=======
+        const { data, error } = await query
+          .order(sortField, { ascending })
+          .order('id', { ascending });
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 
         if (error) {
           console.error('Error filtering solicitacoes:', error);

@@ -10,14 +10,49 @@ import { useEffect, useState, useMemo } from 'react';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 import { formatDatePtBr, formatTimePtBr, formatDateTimePtBr } from '@/lib/dateFormatter';
+<<<<<<< HEAD
 import { Save, X, Trash2, Edit3, Copy, Send, ExternalLink } from 'lucide-react';
+=======
+import { Save, X, Trash2, Edit3, Copy, Send } from 'lucide-react';
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 import { useAuth } from '@/_core/hooks/useAuth';
 import { TechnicianSearchModal } from '@/components/TechnicianSearchModal';
 import { ResponsavelAgendamento, ResponsavelSolicitacao, useAssignmentAvailability } from '@/components/SolicitacaoAssigneeSelect';
 import { buscarEnderecoPorCEP, converterEnderecoViaCEP } from '@/utils/cepLookup';
 import { aplicarMascaraCEP } from '@/utils/masks';
+<<<<<<< HEAD
 import { useSolicitacaoOptions } from '@/hooks/useSolicitacaoOptions';
+=======
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 
+const GRUPOS_PROJETO = [
+  'WiFi Seguro',
+  'Projetos Especiais',
+  'Bradesco',
+  'Santander',
+  'PUC-Universidade',
+  'Hotelarias',
+  'Telemedicina',
+  'Escola Santa Maria',
+  'Viasat',
+  'Daiki Sushi',
+];
+
+const SERVICOS = [
+  'Desativação',
+  'Instalação',
+  'Suporte',
+  'Troca de Endereço',
+];
+
+const OPERADORAS = [
+  'Primesys',
+  'Claro Empresas',
+  'Hughes',
+  'Gowifi',
+  'PUC',
+  'Outro',
+];
 
 export default function DetalheSolicitacao() {
   const { user } = useAuth();
@@ -32,12 +67,15 @@ export default function DetalheSolicitacao() {
   const [formData, setFormData] = useState<any>({});
   const [selectedTecnicoFromModal, setSelectedTecnicoFromModal] = useState<any>(null);
   const [modalCoords, setModalCoords] = useState({ latitude: 0, longitude: 0 });
+<<<<<<< HEAD
 
   const {
   GRUPOS_PROJETO,
   SERVICOS,
   OPERADORAS
 } = useSolicitacaoOptions();
+=======
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
   
   const { data: solicitacoesData = [] } = trpc.solicitacoes.list.useQuery();
   const { data: tecnicos = [] } = trpc.tecnicos.list.useQuery();
@@ -52,6 +90,7 @@ export default function DetalheSolicitacao() {
     },
     { enabled: showTecnicoModal && modalCoords.latitude !== 0 && modalCoords.longitude !== 0 }
   );
+<<<<<<< HEAD
 
   const updateTecnicoMutation = trpc.tecnicos.update.useMutation();
   const [showEditTecnicoModal, setShowEditTecnicoModal] = useState(false);
@@ -98,6 +137,8 @@ export default function DetalheSolicitacao() {
 };
 
 
+=======
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 
   const solicitacao = useMemo(() => {
     if (!pathId) return null;
@@ -170,6 +211,7 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       };
       setFormData(mappedSolicitacao);
     }
+<<<<<<< HEAD
 
     // Atualiza o título da aba
     if (pathId) {
@@ -178,6 +220,9 @@ Técnico: ${tecnicoAssociado?.tec_nome || 'N/A'}`;
       document.title = 'Detalhe da Solicitação | GoWiFi';
     }
   }, [solicitacao, pathId]);
+=======
+  }, [solicitacao]);
+>>>>>>> 42da2da8d4f2262c35405c03964e227516df5f77
 
   const handleEditToggle = () => {
     if (isEditMode) {
